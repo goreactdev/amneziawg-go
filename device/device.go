@@ -46,6 +46,9 @@ type Device struct {
 		port          uint16 // listening port
 		fwmark        uint32 // mark value (0 = disabled)
 		brokenRoaming bool
+		obfsIn        conceal.Obfs
+		obfsOut       conceal.Obfs
+		network       string
 	}
 
 	staticIdentity struct {
@@ -322,6 +325,10 @@ func NewDevice(tunDevice tun.Device, bind conn.Bind, logger *Logger) *Device {
 	device.rate.limiter.Init()
 	device.indexTable.Init()
 
+	device.net.obfsIn = conceal.DefaultSizedPayloadObfs()
+	device.net.obfsOut = conceal.DefaultSizedPayloadObfs()
+	device.net.network = "tcp"
+
 	device.headers.init = &magicHeader{start: MessageInitiationType, end: MessageInitiationType}
 	device.headers.response = &magicHeader{start: MessageResponseType, end: MessageResponseType}
 	device.headers.cookie = &magicHeader{start: MessageCookieReplyType, end: MessageCookieReplyType}
@@ -515,6 +522,19 @@ func (device *Device) BindUpdate() error {
 	var err error
 	var recvFns []conn.ReceiveFunc
 	netc := &device.net
+
+	underlying := netc.bind
+	if multi, ok := netc.bind.(*conn.Multibind); ok {
+		if err := multi.SelectNetwork(netc.network); err != nil {
+			return err
+		}
+		underlying = multi.Bind
+	}
+
+	if obfuscatable, ok := underlying.(conn.Obfuscatable); ok {
+		obfuscatable.SetObfsIn(netc.obfsIn)
+		obfuscatable.SetObfsOut(netc.obfsOut)
+	}
 
 	recvFns, netc.port, err = netc.bind.Open(netc.port)
 	if err != nil {

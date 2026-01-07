@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/amnezia-vpn/amneziawg-go/conceal"
-	"github.com/amnezia-vpn/amneziawg-go/conn"
 	"github.com/amnezia-vpn/amneziawg-go/ipc"
 )
 
@@ -91,8 +90,16 @@ func (device *Device) IpcGetOperation(w io.Writer) error {
 			keyf("private_key", (*[32]byte)(&device.staticIdentity.privateKey))
 		}
 
-		if mb, ok := (device.net.bind).(*conn.Multibind); ok {
-			sendf("network=%s", mb.Proto())
+		if len(device.net.network) > 0 {
+			sendf("network=%s", device.net.network)
+		}
+
+		if device.net.obfsIn != nil {
+			sendf("fmt_in=%s", device.net.obfsIn.Spec())
+		}
+
+		if device.net.obfsOut != nil {
+			sendf("fmt_out=%s", device.net.obfsOut.Spec())
 		}
 
 		if device.net.port != 0 {
@@ -275,25 +282,49 @@ func (device *Device) handleDeviceLine(key, value string) error {
 		device.SetPrivateKey(sk)
 
 	case "network":
-		mb, ok := (device.net.bind).(*conn.Multibind)
-		if !ok {
-			return ipcErrorf(ipc.IpcErrorInvalid, "conn.Multibind is required to set network")
-		}
-
-		if err := device.BindClose(); err != nil {
-			return ipcErrorf(ipc.IpcErrorPortInUse, "failed to stop bind: %w", err)
-		}
-
 		device.net.Lock()
-		if err := mb.SelectProto(value); err != nil {
-			return ipcErrorf(ipc.IpcErrorInvalid, "failed to set network: %w", err)
-		}
+		device.net.network = value
 		device.net.Unlock()
 
 		device.log.Verbosef("UAPI: Updating network")
 
 		if err := device.BindUpdate(); err != nil {
+			// TODO: change IpcErrorPortInUse to something reasonable
 			return ipcErrorf(ipc.IpcErrorPortInUse, "failed to set network: %w", err)
+		}
+
+	case "fmt_in":
+		obfs, err := conceal.BuildObfs(value)
+		if err != nil {
+			return ipcErrorf(ipc.IpcErrorInvalid, "failed to parse obfuscators: %w", err)
+		}
+
+		device.net.Lock()
+		device.net.obfsIn = obfs
+		device.net.Unlock()
+
+		device.log.Verbosef("UAPI: Updating fmt_in")
+
+		if err := device.BindUpdate(); err != nil {
+			// TODO: change IpcErrorPortInUse to something reasonable
+			return ipcErrorf(ipc.IpcErrorPortInUse, "failed to set fmt_in: %w", err)
+		}
+
+	case "fmt_out":
+		obfs, err := conceal.BuildObfs(value)
+		if err != nil {
+			return ipcErrorf(ipc.IpcErrorInvalid, "failed to parse obfuscators: %w", err)
+		}
+
+		device.net.Lock()
+		device.net.obfsOut = obfs
+		device.net.Unlock()
+
+		device.log.Verbosef("UAPI: Updating fmt_out")
+
+		if err := device.BindUpdate(); err != nil {
+			// TODO: change IpcErrorPortInUse to something reasonable
+			return ipcErrorf(ipc.IpcErrorPortInUse, "failed to set fmt_out: %w", err)
 		}
 
 	case "listen_port":

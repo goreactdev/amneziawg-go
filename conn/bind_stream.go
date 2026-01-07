@@ -26,11 +26,11 @@ func NewBindStream() *BindStream {
 				return new(streamPacketQueue)
 			},
 		},
-		obfs: conceal.DefaultSizedPayloadObfs(),
 	}
 }
 
 var _ Bind = (*BindStream)(nil)
+var _ Obfuscatable = (*BindStream)(nil)
 
 type BindStream struct {
 	queue            chan *streamPacketQueue
@@ -41,7 +41,7 @@ type BindStream struct {
 	dialer           net.Dialer
 	listenConfig     net.ListenConfig
 	port             uint16
-	obfs             conceal.Obfs
+	obfConnOpts      conceal.ObfuscatedConnOpts
 }
 
 func (b *BindStream) readFaucet() ReceiveFunc {
@@ -188,8 +188,8 @@ func (b *BindStream) dial(ep *streamEndpoint) error {
 	return nil
 }
 
-func (b *BindStream) upgradeConn(orig net.Conn) net.Conn {
-	return conceal.NewObfuscatedConn(orig, b.obfs)
+func (b *BindStream) upgradeConn(conn net.Conn) net.Conn {
+	return conceal.NewObfuscatedConn(conn, b.obfConnOpts)
 }
 
 func (b *BindStream) Open(port uint16) (fns []ReceiveFunc, actualPort uint16, err error) {
@@ -252,6 +252,14 @@ func (b *BindStream) Close() error {
 
 func (b *BindStream) BatchSize() int {
 	return 1
+}
+
+func (b *BindStream) SetObfsIn(obfs conceal.Obfs) {
+	b.obfConnOpts.ObfsOut = obfs
+}
+
+func (b *BindStream) SetObfsOut(obfs conceal.Obfs) {
+	b.obfConnOpts.ObfsOut = obfs
 }
 
 var _ Endpoint = (*streamEndpoint)(nil)

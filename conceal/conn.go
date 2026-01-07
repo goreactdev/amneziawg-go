@@ -8,14 +8,21 @@ import (
 
 type ObfuscatedConn struct {
 	net.Conn
-	obfs Obfs
-	bufs BufferPool
+	obfsIn  Obfs
+	obfsOut Obfs
+	bufs    BufferPool
 }
 
-func NewObfuscatedConn(conn net.Conn, obfs Obfs) *ObfuscatedConn {
+type ObfuscatedConnOpts struct {
+	ObfsIn  Obfs
+	ObfsOut Obfs
+}
+
+func NewObfuscatedConn(conn net.Conn, opts ObfuscatedConnOpts) *ObfuscatedConn {
 	return &ObfuscatedConn{
-		Conn: conn,
-		obfs: obfs,
+		Conn:    conn,
+		obfsIn:  opts.ObfsIn,
+		obfsOut: opts.ObfsOut,
 		bufs: BufferPool{
 			Pool: sync.Pool{
 				New: func() any {
@@ -32,7 +39,7 @@ func (c *ObfuscatedConn) Read(b []byte) (n int, err error) {
 		flexBuffer: NewFlexBuffer(b),
 		tmpPool:    &c.bufs,
 	}
-	for _, obf := range c.obfs {
+	for _, obf := range c.obfsIn {
 		if err := obf.Read(c.Conn, ctx); err != nil {
 			return 0, err
 		}
@@ -51,7 +58,7 @@ func (c *ObfuscatedConn) Write(b []byte) (n int, err error) {
 
 	writer := bytes.NewBuffer(buf[:0])
 
-	for _, obf := range c.obfs {
+	for _, obf := range c.obfsOut {
 		if err := obf.Write(writer, ctx); err != nil {
 			return 0, err
 		}
