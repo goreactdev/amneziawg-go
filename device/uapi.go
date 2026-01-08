@@ -95,11 +95,11 @@ func (device *Device) IpcGetOperation(w io.Writer) error {
 		}
 
 		if device.net.obfsIn != nil {
-			sendf("fmt_in=%s", device.net.obfsIn.Spec())
+			sendf("format_in=%s", device.net.obfsIn.Spec())
 		}
 
 		if device.net.obfsOut != nil {
-			sendf("fmt_out=%s", device.net.obfsOut.Spec())
+			sendf("format_out=%s", device.net.obfsOut.Spec())
 		}
 
 		if device.net.port != 0 {
@@ -293,7 +293,7 @@ func (device *Device) handleDeviceLine(key, value string) error {
 			return ipcErrorf(ipc.IpcErrorPortInUse, "failed to set network: %w", err)
 		}
 
-	case "fmt_in":
+	case "format_in":
 		obfs, err := conceal.BuildObfs(value)
 		if err != nil {
 			return ipcErrorf(ipc.IpcErrorInvalid, "failed to parse obfuscators: %w", err)
@@ -310,7 +310,7 @@ func (device *Device) handleDeviceLine(key, value string) error {
 			return ipcErrorf(ipc.IpcErrorPortInUse, "failed to set fmt_in: %w", err)
 		}
 
-	case "fmt_out":
+	case "format_out":
 		obfs, err := conceal.BuildObfs(value)
 		if err != nil {
 			return ipcErrorf(ipc.IpcErrorInvalid, "failed to parse obfuscators: %w", err)
