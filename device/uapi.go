@@ -138,19 +138,19 @@ func (device *Device) IpcGetOperation(w io.Writer) error {
 			sendf("s4=%d", device.paddings.transport)
 		}
 
-		if device.headers.init != nil {
+		if !device.headers.init.IsSingleValue(MessageInitiationType) {
 			sendf("h1=%s", device.headers.init.GenSpec())
 		}
 
-		if device.headers.response != nil {
+		if !device.headers.response.IsSingleValue(MessageResponseType) {
 			sendf("h2=%s", device.headers.response.GenSpec())
 		}
 
-		if device.headers.cookie != nil {
+		if !device.headers.cookie.IsSingleValue(MessageCookieReplyType) {
 			sendf("h3=%s", device.headers.cookie.GenSpec())
 		}
 
-		if device.headers.transport != nil {
+		if !device.headers.transport.IsSingleValue(MessageTransportType) {
 			sendf("h4=%s", device.headers.transport.GenSpec())
 		}
 

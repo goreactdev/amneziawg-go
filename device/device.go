@@ -327,12 +327,12 @@ func NewDevice(tunDevice tun.Device, bind conn.Bind, logger *Logger) *Device {
 
 	device.net.obfsIn = conceal.DefaultSizedPayloadObfs()
 	device.net.obfsOut = conceal.DefaultSizedPayloadObfs()
-	device.net.network = "tcp"
+	device.net.network = "udp"
 
-	device.headers.init = &magicHeader{start: MessageInitiationType, end: MessageInitiationType}
-	device.headers.response = &magicHeader{start: MessageResponseType, end: MessageResponseType}
-	device.headers.cookie = &magicHeader{start: MessageCookieReplyType, end: MessageCookieReplyType}
-	device.headers.transport = &magicHeader{start: MessageTransportType, end: MessageTransportType}
+	device.headers.init = magicHeaderFromSingleValue(MessageInitiationType)
+	device.headers.response = magicHeaderFromSingleValue(MessageResponseType)
+	device.headers.cookie = magicHeaderFromSingleValue(MessageCookieReplyType)
+	device.headers.transport = magicHeaderFromSingleValue(MessageTransportType)
 
 	device.PopulatePools()
 

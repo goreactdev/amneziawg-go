@@ -45,6 +45,13 @@ func newMagicHeader(spec string) (*magicHeader, error) {
 	}, nil
 }
 
+func magicHeaderFromSingleValue(val uint32) *magicHeader {
+	return &magicHeader{
+		start: val,
+		end:   val,
+	}
+}
+
 func (h *magicHeader) GenSpec() string {
 	if h.start == h.end {
 		return fmt.Sprintf("%d", h.start)
@@ -60,4 +67,8 @@ func (h *magicHeader) Generate() uint32 {
 	high := int64(h.end - h.start + 1)
 	r, _ := rand.Int(rand.Reader, big.NewInt(high))
 	return h.start + uint32(r.Int64())
+}
+
+func (h *magicHeader) IsSingleValue(val uint32) bool {
+	return h.start == val && h.end == val
 }
