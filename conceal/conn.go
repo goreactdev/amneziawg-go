@@ -19,6 +19,10 @@ type ObfuscatedConnOpts struct {
 }
 
 func NewObfuscatedConn(conn net.Conn, opts ObfuscatedConnOpts) *ObfuscatedConn {
+	if opts.ObfsIn == nil && opts.ObfsOut == nil {
+		return nil
+	}
+
 	return &ObfuscatedConn{
 		Conn:    conn,
 		obfsIn:  opts.ObfsIn,
@@ -39,6 +43,9 @@ func (c *ObfuscatedConn) Read(b []byte) (n int, err error) {
 		flexBuffer: NewFlexBuffer(b),
 		tmpPool:    &c.bufs,
 	}
+	if c.obfsIn == nil {
+		return c.Conn.Read(b)
+	}
 	for _, obf := range c.obfsIn {
 		if err := obf.Read(c.Conn, ctx); err != nil {
 			return 0, err
@@ -48,6 +55,10 @@ func (c *ObfuscatedConn) Read(b []byte) (n int, err error) {
 }
 
 func (c *ObfuscatedConn) Write(b []byte) (n int, err error) {
+	if c.obfsOut == nil {
+		return c.Conn.Write(b)
+	}
+
 	ctx := &writeContext{
 		flexBuffer: NewFlexBuffer(b),
 		tmpPool:    &c.bufs,

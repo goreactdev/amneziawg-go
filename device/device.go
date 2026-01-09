@@ -325,8 +325,6 @@ func NewDevice(tunDevice tun.Device, bind conn.Bind, logger *Logger) *Device {
 	device.rate.limiter.Init()
 	device.indexTable.Init()
 
-	device.net.obfsIn = conceal.DefaultSizedPayloadObfs()
-	device.net.obfsOut = conceal.DefaultSizedPayloadObfs()
 	device.net.network = "udp"
 
 	device.headers.init = magicHeaderFromSingleValue(MessageInitiationType)

@@ -186,7 +186,10 @@ func (b *BindStream) dial(ep *streamEndpoint) error {
 }
 
 func (b *BindStream) upgradeConn(conn net.Conn) net.Conn {
-	return conceal.NewObfuscatedConn(conn, b.obfConnOpts)
+	if obfuscated := conceal.NewObfuscatedConn(conn, b.obfConnOpts); obfuscated != nil {
+		conn = obfuscated
+	}
+	return conn
 }
 
 func (b *BindStream) Open(port uint16) (fns []ReceiveFunc, actualPort uint16, err error) {
