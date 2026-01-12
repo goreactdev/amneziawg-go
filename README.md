@@ -114,14 +114,8 @@ Value as a tag-sequence, as described in Tag format paragraph
 - In case of `tcp`, the connection is always initiated by the peer which has `Endpoint` specified
 - In case of `tcp`, the device would not listen if `ListenPort` is omitted
 
-> [!IMPORTANT]
-> For TCP network it is really neccessary to specify `<dz>` tag somewhere because of the stream nature - the original packet could be coalecsed with the next one or splitted into the fragments
-
-> [!IMPORTANT]
-> Always put `<d>` tag in the format.
-
-> [!IMPORTANT]
-> Peer's `FormatIn` must be the same as device's `FormatOut` for ***machines*** to understand each other formats
+> [!NOTE]
+> Although it is not required, `Network = tcp` would highly-likely require `FormatIn` and `FormatOut` parameters since stream connection does not have fixed-sized messages
 
 ### Message format
 
@@ -137,6 +131,15 @@ Value as a tag-sequence, as described in Tag format paragraph
 FormatIn = <b 0x4567><dz be 4><r 12><d><t>
 FormatOut = <b 0x1234><dz be 4><d>
 ```
+
+> [!IMPORTANT]
+> For TCP network it is really neccessary to specify `<dz>` tag somewhere because of the stream nature - the original packet could be coalecsed with the next one or splitted into the fragments
+
+> [!IMPORTANT]
+> Always put `<d>` tag in the format.
+
+> [!IMPORTANT]
+> Peer's `FormatIn` must be the same as device's `FormatOut` for ***machines*** to understand each other formats
 
 ## Tags format
 
