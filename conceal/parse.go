@@ -124,11 +124,12 @@ func buildDataSizeObf(val string) (Obf, error) {
 		return nil, errors.New("wrong amount of arguments")
 	}
 
-	if format, err = NumFormatFromString(parts[0]); err != nil {
+	if format, err = buildNumFormat(parts[0]); err != nil {
 		return nil, err
 	}
 
-	if format == NumFormatAscii {
+	switch format {
+	case NumFormatAscii, NumFormatHex:
 		parts[1] = strings.TrimPrefix(parts[1], "0x")
 
 		var bytes []byte
@@ -142,7 +143,7 @@ func buildDataSizeObf(val string) (Obf, error) {
 		}
 
 		end = bytes[0]
-	} else {
+	default:
 		if length, err = strconv.Atoi(parts[1]); err != nil {
 			return nil, err
 		}
@@ -153,6 +154,22 @@ func buildDataSizeObf(val string) (Obf, error) {
 		format: format,
 		end:    end,
 	}, nil
+}
+
+func buildNumFormat(str string) (NumFormat, error) {
+	str = strings.ToLower(str)
+
+	switch str {
+	case "be":
+		return NumFormatBE, nil
+	case "le":
+		return NumFormatLE, nil
+	case "ascii":
+		return NumFormatAscii, nil
+	case "hex":
+		return NumFormatHex, nil
+	}
+	return NumFormatBE, errors.New("wrong format")
 }
 
 func buildDataObf(val string) (Obf, error) {

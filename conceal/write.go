@@ -5,12 +5,13 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"io"
+	"strconv"
 	"time"
 )
 
 type writeContext struct {
 	*flexBuffer
-	tmpPool *BufferPool
+	*BufferPool
 }
 
 func (o *bytesObf) Write(writer io.Writer, ctx *writeContext) error {
@@ -29,10 +30,10 @@ func (o *dataObf) Write(writer io.Writer, ctx *writeContext) error {
 }
 
 func (o *dataSizeObf) Write(writer io.Writer, ctx *writeContext) error {
-	tmp := ctx.tmpPool.GetBuffer()
-	defer ctx.tmpPool.Put(tmp)
+	tmp := ctx.GetBuffer()
+	defer ctx.Put(tmp)
 
-	var size int = ctx.Cap()
+	size := int32(ctx.Cap())
 
 	switch o.format {
 	case NumFormatBE:
@@ -52,24 +53,17 @@ func (o *dataSizeObf) Write(writer io.Writer, ctx *writeContext) error {
 			return err
 		}
 	case NumFormatAscii:
-		var symbols int
-		if size == 0 {
-			symbols = 1
-		} else {
-			tmpSize := size
-			for tmpSize > 0 {
-				symbols++
-				tmpSize /= 10
-			}
-		}
+		b := strconv.AppendInt(tmp[:0], int64(size), 10)
+		b = append(b, o.end)
 
-		for i := symbols - 1; i >= 0; i-- {
-			tmp[i] = byte(size%10 + '0')
-			size /= 10
+		if _, err := writer.Write(b); err != nil {
+			return err
 		}
-		tmp[symbols] = o.end
+	case NumFormatHex:
+		b := strconv.AppendInt(tmp[:0], int64(size), 16)
+		b = append(b, o.end)
 
-		if _, err := writer.Write(tmp[:symbols+1]); err != nil {
+		if _, err := writer.Write(b); err != nil {
 			return err
 		}
 	}
@@ -83,8 +77,8 @@ func (o *dataStringObf) Write(writer io.Writer, ctx *writeContext) error {
 		return io.ErrShortBuffer
 	}
 
-	tmp := ctx.tmpPool.GetBuffer()
-	defer ctx.tmpPool.Put(tmp)
+	tmp := ctx.GetBuffer()
+	defer ctx.Put(tmp)
 
 	base64len := base64.RawStdEncoding.EncodedLen(len(data))
 	buf := tmp[:base64len]
@@ -96,8 +90,8 @@ func (o *dataStringObf) Write(writer io.Writer, ctx *writeContext) error {
 }
 
 func (o *randObf) Write(writer io.Writer, ctx *writeContext) error {
-	tmp := ctx.tmpPool.GetBuffer()
-	defer ctx.tmpPool.Put(tmp)
+	tmp := ctx.GetBuffer()
+	defer ctx.Put(tmp)
 
 	buf := tmp[:o.length]
 	rand.Read(buf)
@@ -109,8 +103,8 @@ func (o *randObf) Write(writer io.Writer, ctx *writeContext) error {
 const chars52 = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 func (o *randCharObf) Write(writer io.Writer, ctx *writeContext) error {
-	tmp := ctx.tmpPool.GetBuffer()
-	defer ctx.tmpPool.Put(tmp)
+	tmp := ctx.GetBuffer()
+	defer ctx.Put(tmp)
 
 	buf := tmp[:o.length]
 	rand.Read(buf)
@@ -125,8 +119,8 @@ func (o *randCharObf) Write(writer io.Writer, ctx *writeContext) error {
 const digits10 = "0123456789"
 
 func (o *randDigitObf) Write(writer io.Writer, ctx *writeContext) error {
-	tmp := ctx.tmpPool.GetBuffer()
-	defer ctx.tmpPool.Put(tmp)
+	tmp := ctx.GetBuffer()
+	defer ctx.Put(tmp)
 
 	buf := tmp[:o.length]
 	rand.Read(buf)

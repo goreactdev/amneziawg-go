@@ -30,11 +30,25 @@ func (o *randObf) Spec() string {
 }
 
 func (o *dataSizeObf) Spec() string {
-	if o.format == NumFormatAscii {
-		return fmt.Sprintf("<dz %s 0x%02x>", o.format.ToString(), o.end)
-	} else {
-		return fmt.Sprintf("<dz %s %d>", o.format.ToString(), o.length)
+	switch o.format {
+	case NumFormatAscii, NumFormatHex:
+		return fmt.Sprintf("<dz %s 0x%02x>", o.format.Spec(), o.end)
 	}
+	return fmt.Sprintf("<dz %s %d>", o.format.Spec(), o.length)
+}
+
+func (f NumFormat) Spec() string {
+	switch f {
+	case NumFormatBE:
+		return "be"
+	case NumFormatLE:
+		return "le"
+	case NumFormatAscii:
+		return "ascii"
+	case NumFormatHex:
+		return "hex"
+	}
+	return ""
 }
 
 func (o *dataObf) Spec() string {

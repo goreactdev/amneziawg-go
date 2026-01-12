@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"unicode"
 )
 
@@ -16,13 +17,13 @@ var (
 
 type readContext struct {
 	*flexBuffer
-	tmpPool      *BufferPool
+	*BufferPool
 	nextDataSize int
 }
 
 func (o *bytesObf) Read(reader io.Reader, ctx *readContext) error {
-	tmp := ctx.tmpPool.GetBuffer()
-	defer ctx.tmpPool.Put(tmp)
+	tmp := ctx.GetBuffer()
+	defer ctx.Put(tmp)
 
 	buf := tmp[:len(o.data)]
 	if _, err := io.ReadFull(reader, buf); err != nil {
@@ -47,8 +48,8 @@ func (o *dataObf) Read(reader io.Reader, ctx *readContext) error {
 }
 
 func (o *dataSizeObf) Read(reader io.Reader, ctx *readContext) error {
-	tmp := ctx.tmpPool.GetBuffer()
-	defer ctx.tmpPool.Put(tmp)
+	tmp := ctx.GetBuffer()
+	defer ctx.Put(tmp)
 
 	var size int
 
@@ -72,20 +73,40 @@ func (o *dataSizeObf) Read(reader io.Reader, ctx *readContext) error {
 			size |= int(buf[i])
 		}
 	case NumFormatAscii:
+		i := 0
 		for {
-			buf := tmp[:1]
-			if _, err := io.ReadFull(reader, buf); err != nil {
+			if _, err := io.ReadFull(reader, tmp[i:i+1]); err != nil {
 				return err
 			}
-			if buf[0] == o.end {
+			if tmp[i] == o.end {
 				break
 			}
-			if buf[0] < '0' || buf[0] > '9' {
-				return errors.New("non-number symbol")
-			}
-			size *= 10
-			size += int(buf[0] - '0')
+			i++
 		}
+
+		size64, err := strconv.ParseInt(string(tmp[:i]), 10, 32)
+		if err != nil {
+			return err
+		}
+		size = int(size64)
+
+	case NumFormatHex:
+		i := 0
+		for {
+			if _, err := io.ReadFull(reader, tmp[i:i+1]); err != nil {
+				return err
+			}
+			if tmp[i] == o.end {
+				break
+			}
+			i++
+		}
+
+		size64, err := strconv.ParseInt(string(tmp[:i]), 16, 32)
+		if err != nil {
+			return err
+		}
+		size = int(size64)
 	}
 
 	ctx.nextDataSize = size
@@ -93,8 +114,8 @@ func (o *dataSizeObf) Read(reader io.Reader, ctx *readContext) error {
 }
 
 func (o *dataStringObf) Read(reader io.Reader, ctx *readContext) error {
-	tmp := ctx.tmpPool.GetBuffer()
-	defer ctx.tmpPool.Put(tmp)
+	tmp := ctx.GetBuffer()
+	defer ctx.Put(tmp)
 
 	base64len := base64.RawStdEncoding.EncodedLen(ctx.nextDataSize)
 	buf := tmp[:base64len]
@@ -117,8 +138,8 @@ func (o *dataStringObf) Read(reader io.Reader, ctx *readContext) error {
 }
 
 func (o *randObf) Read(reader io.Reader, ctx *readContext) error {
-	tmp := ctx.tmpPool.GetBuffer()
-	defer ctx.tmpPool.Put(tmp)
+	tmp := ctx.GetBuffer()
+	defer ctx.Put(tmp)
 
 	buf := tmp[:o.length]
 	if _, err := io.ReadFull(reader, buf); err != nil {
@@ -131,8 +152,8 @@ func (o *randObf) Read(reader io.Reader, ctx *readContext) error {
 }
 
 func (o *randCharObf) Read(reader io.Reader, ctx *readContext) error {
-	tmp := ctx.tmpPool.GetBuffer()
-	defer ctx.tmpPool.Put(tmp)
+	tmp := ctx.GetBuffer()
+	defer ctx.Put(tmp)
 
 	buf := tmp[:o.length]
 	if _, err := io.ReadFull(reader, buf); err != nil {
@@ -149,8 +170,8 @@ func (o *randCharObf) Read(reader io.Reader, ctx *readContext) error {
 }
 
 func (o *randDigitObf) Read(reader io.Reader, ctx *readContext) error {
-	tmp := ctx.tmpPool.GetBuffer()
-	defer ctx.tmpPool.Put(tmp)
+	tmp := ctx.GetBuffer()
+	defer ctx.Put(tmp)
 
 	buf := tmp[:o.length]
 	if _, err := io.ReadFull(reader, buf); err != nil {

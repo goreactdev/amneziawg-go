@@ -41,7 +41,7 @@ func NewObfuscatedConn(conn net.Conn, opts ObfuscatedConnOpts) *ObfuscatedConn {
 func (c *ObfuscatedConn) Read(b []byte) (n int, err error) {
 	ctx := &readContext{
 		flexBuffer: NewFlexBuffer(b),
-		tmpPool:    &c.bufs,
+		BufferPool: &c.bufs,
 	}
 	if c.obfsIn == nil {
 		return c.Conn.Read(b)
@@ -61,7 +61,7 @@ func (c *ObfuscatedConn) Write(b []byte) (n int, err error) {
 
 	ctx := &writeContext{
 		flexBuffer: NewFlexBuffer(b),
-		tmpPool:    &c.bufs,
+		BufferPool: &c.bufs,
 	}
 
 	buf := c.bufs.GetBuffer()
