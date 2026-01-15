@@ -117,9 +117,14 @@ func (b *BindStream) accept(listener net.Listener) {
 func (b *BindStream) handleAccepted(conn net.Conn) {
 	defer b.wg.Done()
 
-	ep, err := streamEndpointFromConn(conn)
+	ap, err := netip.ParseAddrPort(conn.RemoteAddr().String())
 	if err != nil {
-		// log something?
+		// add logs
+	}
+
+	ep := &streamEndpoint{
+		conn: conn,
+		dst:  ap,
 	}
 
 	b.wg.Add(1)
@@ -227,10 +232,6 @@ func (b *BindStream) Send(bufs [][]byte, ep Endpoint) error {
 	return nil
 }
 
-func (b *BindStream) ParseEndpoint(s string) (Endpoint, error) {
-	return streamEndpointFromAddr(s)
-}
-
 func (b *BindStream) closeConnections() {
 	if b.cancel != nil {
 		b.cancel()
@@ -248,20 +249,19 @@ func (b *BindStream) Close() error {
 	return nil
 }
 
+func (b *BindStream) ParseEndpoint(s string) (Endpoint, error) {
+	tcpAddr, err := net.ResolveTCPAddr("tcp", s)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve addr: %v", err)
+	}
+
+	return &streamEndpoint{
+		dst: tcpAddr.AddrPort(),
+	}, nil
+}
+
 func (b *BindStream) BatchSize() int {
 	return 1
-}
-
-func (b *BindStream) SetFramedOpts(opts conceal.FramedOpts) {
-	b.framedOpts = opts
-}
-
-func (b *BindStream) SetPreludeOpts(opts conceal.PreludeOpts) {
-	b.preludeOpts = opts
-}
-
-func (b *BindStream) SetMasqueradeOpts(opts conceal.MasqueradeOpts) {
-	b.masqueradeOpts = opts
 }
 
 var _ Endpoint = (*streamEndpoint)(nil)
@@ -270,30 +270,7 @@ type streamEndpoint struct {
 	conn net.Conn
 
 	dst   netip.AddrPort
-	mutex sync.RWMutex
-}
-
-func streamEndpointFromConn(conn net.Conn) (*streamEndpoint, error) {
-	ap, err := netip.ParseAddrPort(conn.RemoteAddr().String())
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse addr: %v", err)
-	}
-
-	return &streamEndpoint{
-		conn: conn,
-		dst:  ap,
-	}, nil
-}
-
-func streamEndpointFromAddr(addr string) (*streamEndpoint, error) {
-	tcpAddr, err := net.ResolveTCPAddr("tcp", addr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to resolve addr: %v", err)
-	}
-
-	return &streamEndpoint{
-		dst: tcpAddr.AddrPort(),
-	}, nil
+	mutex sync.Mutex
 }
 
 func (e *streamEndpoint) Close() {

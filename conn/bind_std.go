@@ -95,18 +95,6 @@ var (
 	_ Endpoint = &StdNetEndpoint{}
 )
 
-func (b *StdNetBind) SetFramedOpts(opts conceal.FramedOpts) {
-	b.framedOpts = opts
-}
-
-func (b *StdNetBind) SetPreludeOpts(opts conceal.PreludeOpts) {
-	b.preludeOpts = opts
-}
-
-func (b *StdNetBind) SetMasqueradeOpts(opts conceal.MasqueradeOpts) {
-	b.masqueradeOpts = opts
-}
-
 func (*StdNetBind) ParseEndpoint(s string) (Endpoint, error) {
 	e, err := netip.ParseAddrPort(s)
 	if err != nil {
