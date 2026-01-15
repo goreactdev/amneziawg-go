@@ -92,38 +92,8 @@ func (b *BindStream) readStream(ep *streamEndpoint) {
 	}
 }
 
-func (b *BindStream) listen(port uint16) {
+func (b *BindStream) accept(listener net.Listener) {
 	defer b.wg.Done()
-
-	for {
-		select {
-		case <-b.ctx.Done():
-			return
-		default:
-		}
-
-		listenDone := make(chan struct{})
-
-		listener, err := b.listenConfig.Listen(b.ctx, "tcp", ":"+strconv.Itoa(int(port)))
-		if err != nil {
-			continue
-		}
-
-		b.wg.Add(1)
-		go b.accept(listener, listenDone)
-
-		select {
-		case <-b.ctx.Done():
-		case <-listenDone:
-		}
-
-		listener.Close()
-	}
-}
-
-func (b *BindStream) accept(listener net.Listener, listenDone chan struct{}) {
-	defer b.wg.Done()
-	defer close(listenDone)
 
 	for {
 		select {
@@ -140,11 +110,11 @@ func (b *BindStream) accept(listener net.Listener, listenDone chan struct{}) {
 		conn = b.upgradeConn(conn)
 
 		b.wg.Add(1)
-		go b.handleAccepted(conn, listenDone)
+		go b.handleAccepted(conn)
 	}
 }
 
-func (b *BindStream) handleAccepted(conn net.Conn, listenDone chan struct{}) {
+func (b *BindStream) handleAccepted(conn net.Conn) {
 	defer b.wg.Done()
 
 	ep, err := streamEndpointFromConn(conn)
@@ -155,11 +125,7 @@ func (b *BindStream) handleAccepted(conn net.Conn, listenDone chan struct{}) {
 	b.wg.Add(1)
 	go b.readStream(ep)
 
-	select {
-	case <-b.ctx.Done():
-	case <-listenDone:
-	}
-
+	<-b.ctx.Done()
 	ep.Close()
 }
 
@@ -205,18 +171,34 @@ func (b *BindStream) upgradeConn(conn net.Conn) net.Conn {
 	return conn
 }
 
-func (b *BindStream) Open(port uint16) (fns []ReceiveFunc, actualPort uint16, err error) {
-	b.port = port
-
+func (b *BindStream) openConnections() error {
 	b.ctx, b.cancel = context.WithCancel(context.Background())
-	b.queue = make(chan *streamPacketQueue, 1024)
 
-	if port != 0 {
+	if b.port != 0 {
+		listener, err := b.listenConfig.Listen(b.ctx, "tcp", ":"+strconv.Itoa(int(b.port)))
+		if err != nil {
+			return err
+		}
+
 		b.wg.Add(1)
-		go b.listen(port)
+		go func() {
+			defer b.wg.Done()
+			<-b.ctx.Done()
+			listener.Close()
+		}()
+
+		b.wg.Add(1)
+		go b.accept(listener)
 	}
 
-	return []ReceiveFunc{b.readFaucet()}, port, nil
+	return nil
+}
+
+func (b *BindStream) Open(port uint16) (fns []ReceiveFunc, actualPort uint16, err error) {
+	b.queue = make(chan *streamPacketQueue, 1024)
+	b.port = port
+
+	return []ReceiveFunc{b.readFaucet()}, b.port, b.openConnections()
 }
 
 func (b *BindStream) Send(bufs [][]byte, ep Endpoint) error {
@@ -249,12 +231,15 @@ func (b *BindStream) ParseEndpoint(s string) (Endpoint, error) {
 	return streamEndpointFromAddr(s)
 }
 
-func (b *BindStream) Close() error {
+func (b *BindStream) closeConnections() {
 	if b.cancel != nil {
 		b.cancel()
 	}
-
 	b.wg.Wait()
+}
+
+func (b *BindStream) Close() error {
+	b.closeConnections()
 
 	if b.queue != nil {
 		close(b.queue)
