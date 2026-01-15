@@ -12,9 +12,15 @@ import (
 	"github.com/amnezia-vpn/amneziawg-go/conceal"
 )
 
+var (
+	_ Bind          = (*BindStream)(nil)
+	_ Framable      = (*BindStream)(nil)
+	_ Preludable    = (*BindStream)(nil)
+	_ Masqueradable = (*BindStream)(nil)
+)
+
 type streamPacketQueue struct {
 	ep  *streamEndpoint
-	err error
 	buf [65535]byte
 	n   int
 }
@@ -26,11 +32,15 @@ func NewBindStream() *BindStream {
 				return new(streamPacketQueue)
 			},
 		},
+		bufferPool: conceal.BufferPool{
+			Pool: sync.Pool{
+				New: func() any {
+					return make([]byte, 65535)
+				},
+			},
+		},
 	}
 }
-
-var _ Bind = (*BindStream)(nil)
-var _ Obfuscatable = (*BindStream)(nil)
 
 type BindStream struct {
 	queue            chan *streamPacketQueue
@@ -38,34 +48,31 @@ type BindStream struct {
 	cancel           context.CancelFunc
 	wg               sync.WaitGroup
 	streamPacketPool sync.Pool
+	bufferPool       conceal.BufferPool
 	dialer           net.Dialer
 	listenConfig     net.ListenConfig
 	port             uint16
-	obfConnOpts      conceal.ObfuscatedConnOpts
+
+	framedOpts     conceal.FramedOpts
+	preludeOpts    conceal.PreludeOpts
+	masqueradeOpts conceal.MasqueradeOpts
 }
 
 func (b *BindStream) readFaucet() ReceiveFunc {
 	return func(packets [][]byte, sizes []int, eps []Endpoint) (n int, err error) {
-		select {
-		case <-b.ctx.Done():
-			return 0, io.EOF
-		case streamPacket, ok := <-b.queue:
-			if !ok {
-				return 0, io.EOF
-			}
-			if streamPacket.err != nil {
-				return 0, streamPacket.err
-			}
-
-			packet := streamPacket.buf[:streamPacket.n]
-
-			copy(packets[0], packet)
-			sizes[0] = streamPacket.n
-			eps[0] = streamPacket.ep
-
-			b.streamPacketPool.Put(streamPacket)
-			return 1, nil
+		streamPacket, ok := <-b.queue
+		if !ok {
+			return 0, net.ErrClosed
 		}
+
+		packet := streamPacket.buf[:streamPacket.n]
+
+		copy(packets[0], packet)
+		sizes[0] = streamPacket.n
+		eps[0] = streamPacket.ep
+
+		b.streamPacketPool.Put(streamPacket)
+		return 1, nil
 	}
 }
 
@@ -75,13 +82,13 @@ func (b *BindStream) readStream(ep *streamEndpoint) {
 	for {
 		sp := b.streamPacketPool.Get().(*streamPacketQueue)
 		n, err := ep.conn.Read(sp.buf[:])
-		sp.ep, sp.err, sp.n = ep, err, n
-		b.queue <- sp
-
 		if err != nil {
 			ep.Close()
 			return
 		}
+
+		sp.ep, sp.n = ep, n
+		b.queue <- sp
 	}
 }
 
@@ -186,8 +193,14 @@ func (b *BindStream) dial(ep *streamEndpoint) error {
 }
 
 func (b *BindStream) upgradeConn(conn net.Conn) net.Conn {
-	if obfuscated := conceal.NewObfuscatedConn(conn, b.obfConnOpts); obfuscated != nil {
-		conn = obfuscated
+	if framed, ok := conceal.NewFramedConn(conn, b.framedOpts); ok {
+		conn = framed
+	}
+	if prelude, ok := conceal.NewPreludeConn(conn, &b.bufferPool, b.preludeOpts); ok {
+		conn = prelude
+	}
+	if masquerade, ok := conceal.NewMasqueradeConn(conn, &b.bufferPool, b.masqueradeOpts); ok {
+		conn = masquerade
 	}
 	return conn
 }
@@ -254,12 +267,16 @@ func (b *BindStream) BatchSize() int {
 	return 1
 }
 
-func (b *BindStream) SetObfsIn(obfs conceal.Obfs) {
-	b.obfConnOpts.ObfsIn = obfs
+func (b *BindStream) SetFramedOpts(opts conceal.FramedOpts) {
+	b.framedOpts = opts
 }
 
-func (b *BindStream) SetObfsOut(obfs conceal.Obfs) {
-	b.obfConnOpts.ObfsOut = obfs
+func (b *BindStream) SetPreludeOpts(opts conceal.PreludeOpts) {
+	b.preludeOpts = opts
+}
+
+func (b *BindStream) SetMasqueradeOpts(opts conceal.MasqueradeOpts) {
+	b.masqueradeOpts = opts
 }
 
 var _ Endpoint = (*streamEndpoint)(nil)

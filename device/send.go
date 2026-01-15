@@ -7,10 +7,8 @@ package device
 
 import (
 	"bytes"
-	"crypto/rand"
 	"encoding/binary"
 	"errors"
-	"math/big"
 	"net"
 	"os"
 	"sync"
@@ -126,29 +124,6 @@ func (peer *Peer) SendHandshakeInitiation(isRetry bool) error {
 		return err
 	}
 
-	var sendBuffer [][]byte
-
-	// for _, ipacket := range peer.device.ipackets {
-	// 	if ipacket != nil {
-	// 		buf := make([]byte, ipacket.ObfuscatedLen(0))
-	// 		ipacket.Obfuscate(buf, nil)
-	// 		sendBuffer = append(sendBuffer, buf)
-	// 	}
-	// }
-
-	jc := peer.device.junk.count
-	jmin := peer.device.junk.min
-	jmax := peer.device.junk.max
-
-	for i := 0; i < jc; i++ {
-		nBig, _ := rand.Int(rand.Reader, big.NewInt(int64(jmax-jmin+1)))
-		n := int(nBig.Int64()) + jmin
-
-		buf := make([]byte, n)
-		rand.Read(buf)
-		sendBuffer = append(sendBuffer, buf)
-	}
-
 	var buf [MessageInitiationSize]byte
 	writer := bytes.NewBuffer(buf[:0])
 	binary.Write(writer, binary.LittleEndian, msg)
@@ -158,16 +133,7 @@ func (peer *Peer) SendHandshakeInitiation(isRetry bool) error {
 	peer.timersAnyAuthenticatedPacketTraversal()
 	peer.timersAnyAuthenticatedPacketSent()
 
-	if padding := peer.device.paddings.init; padding > 0 {
-		buf := make([]byte, padding+len(packet))
-		rand.Read(buf[:padding])
-		copy(buf[padding:], packet)
-		packet = buf
-	}
-
-	sendBuffer = append(sendBuffer, packet)
-
-	err = peer.SendBuffers(sendBuffer)
+	err = peer.SendBuffers([][]byte{packet})
 	if err != nil {
 		peer.device.log.Errorf("%v - Failed to send handshake initiation: %v", peer, err)
 	}
@@ -206,13 +172,6 @@ func (peer *Peer) SendHandshakeResponse() error {
 	peer.timersAnyAuthenticatedPacketTraversal()
 	peer.timersAnyAuthenticatedPacketSent()
 
-	if padding := peer.device.paddings.response; padding > 0 {
-		buf := make([]byte, padding+len(packet))
-		rand.Read(buf[:padding])
-		copy(buf[padding:], packet)
-		packet = buf
-	}
-
 	// TODO: allocation could be avoided
 	err = peer.SendBuffers([][]byte{packet})
 	if err != nil {
@@ -225,14 +184,7 @@ func (device *Device) SendHandshakeCookie(initiatingElem *QueueHandshakeElement)
 	device.log.Verbosef("Sending cookie response for denied handshake message for %v", initiatingElem.endpoint.DstToString())
 
 	sender := binary.LittleEndian.Uint32(initiatingElem.packet[4:8])
-	msgType := device.headers.cookie.Generate()
-
-	reply, err := device.cookieChecker.CreateReply(
-		initiatingElem.packet,
-		sender,
-		initiatingElem.endpoint.DstToBytes(),
-		msgType,
-	)
+	reply, err := device.cookieChecker.CreateReply(initiatingElem.packet, sender, initiatingElem.endpoint.DstToBytes())
 	if err != nil {
 		device.log.Errorf("Failed to create cookie reply: %v", err)
 		return err
@@ -242,13 +194,6 @@ func (device *Device) SendHandshakeCookie(initiatingElem *QueueHandshakeElement)
 	writer := bytes.NewBuffer(buf[:0])
 	binary.Write(writer, binary.LittleEndian, reply)
 	packet := writer.Bytes()
-
-	if padding := device.paddings.cookie; padding > 0 {
-		buf := make([]byte, padding+len(packet))
-		rand.Read(buf[:padding])
-		copy(buf[padding:], packet)
-		packet = buf
-	}
 
 	// TODO: allocation could be avoided
 	device.net.bind.Send([][]byte{packet}, initiatingElem.endpoint)
@@ -515,9 +460,7 @@ func (device *Device) RoutineEncryption(id int) {
 			fieldReceiver := header[4:8]
 			fieldNonce := header[8:16]
 
-			msgType := device.headers.transport.Generate()
-
-			binary.LittleEndian.PutUint32(fieldType, msgType)
+			binary.LittleEndian.PutUint32(fieldType, MessageTransportType)
 			binary.LittleEndian.PutUint32(fieldReceiver, elem.keypair.remoteIndex)
 			binary.LittleEndian.PutUint64(fieldNonce, elem.nonce)
 
@@ -574,16 +517,6 @@ func (peer *Peer) RoutineSequentialSender(maxBatchSize int) {
 		for _, elem := range elemsContainer.elems {
 			if len(elem.packet) != MessageKeepaliveSize {
 				dataSent = true
-
-				if padding := device.paddings.transport; padding > 0 {
-					// elem.packet is stored at the start of elem.buffer
-					// with zero padding
-					for i := len(elem.packet) - 1; i >= 0; i-- {
-						elem.buffer[i+padding] = elem.buffer[i]
-					}
-					rand.Read(elem.buffer[:padding])
-					elem.packet = elem.buffer[:padding+len(elem.packet)]
-				}
 			}
 			bufs = append(bufs, elem.packet)
 		}
@@ -595,7 +528,6 @@ func (peer *Peer) RoutineSequentialSender(maxBatchSize int) {
 		if dataSent {
 			peer.timersDataSent()
 		}
-
 		for _, elem := range elemsContainer.elems {
 			device.PutMessageBuffer(elem.buffer)
 			device.PutOutboundElement(elem)

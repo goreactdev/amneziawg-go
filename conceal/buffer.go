@@ -2,19 +2,19 @@ package conceal
 
 import "sync"
 
-func NewFlexBuffer(buf []byte) *flexBuffer {
-	return &flexBuffer{
+func NewFlexBuffer(buf []byte) *FlexBuffer {
+	return &FlexBuffer{
 		buf: buf,
 	}
 }
 
-type flexBuffer struct {
+type FlexBuffer struct {
 	buf    []byte
 	offset int
 	len    int
 }
 
-func (b *flexBuffer) PushTail(size int) []byte {
+func (b *FlexBuffer) PushTail(size int) []byte {
 	newLen := b.len + size
 	if b.offset+newLen > len(b.buf) {
 		return nil
@@ -25,7 +25,7 @@ func (b *flexBuffer) PushTail(size int) []byte {
 	return b.buf[b.offset+oldLen : b.offset+newLen]
 }
 
-func (b *flexBuffer) PullTail(size int) []byte {
+func (b *FlexBuffer) PullTail(size int) []byte {
 	newLen := b.len - size
 	if newLen < 0 {
 		return nil
@@ -36,7 +36,7 @@ func (b *flexBuffer) PullTail(size int) []byte {
 	return b.buf[b.offset+newLen : b.offset+oldLen]
 }
 
-func (b *flexBuffer) PullHead(size int) []byte {
+func (b *FlexBuffer) PullHead(size int) []byte {
 	if size == -1 {
 		size = len(b.buf)
 	}
@@ -52,11 +52,11 @@ func (b *flexBuffer) PullHead(size int) []byte {
 	return b.buf[oldOffset+b.len : newOffset+b.len]
 }
 
-func (b *flexBuffer) Cap() int {
+func (b *FlexBuffer) Cap() int {
 	return len(b.buf)
 }
 
-func (b *flexBuffer) Len() int {
+func (b *FlexBuffer) Len() int {
 	return b.len
 }
 

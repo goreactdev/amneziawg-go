@@ -8,6 +8,7 @@
 package conn
 
 import (
+	"context"
 	"runtime"
 	"syscall"
 
@@ -66,9 +67,10 @@ func (s *StdNetBind) SetMark(mark uint32) error {
 }
 
 func (b *BindStream) SetMark(mark uint32) error {
-	if err := b.Close(); err != nil {
-		return err
+	if b.cancel != nil {
+		b.cancel()
 	}
+	b.wg.Wait()
 
 	ctrl := b.dialer.Control
 	b.dialer.Control = func(network, address string, c syscall.RawConn) error {
@@ -98,8 +100,10 @@ func (b *BindStream) SetMark(mark uint32) error {
 		return err
 	}
 
-	if _, _, err := b.Open(b.port); err != nil {
-		return err
+	b.ctx, b.cancel = context.WithCancel(context.Background())
+	if b.port != 0 {
+		b.wg.Add(1)
+		go b.listen(b.port)
 	}
 
 	return nil

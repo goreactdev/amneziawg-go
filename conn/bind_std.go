@@ -16,12 +16,16 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/amnezia-vpn/amneziawg-go/conceal"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
 )
 
 var (
-	_ Bind = (*StdNetBind)(nil)
+	_ Bind          = (*StdNetBind)(nil)
+	_ Framable      = (*StdNetBind)(nil)
+	_ Preludable    = (*StdNetBind)(nil)
+	_ Masqueradable = (*StdNetBind)(nil)
 )
 
 // StdNetBind implements Bind for all platforms. While Windows has its own Bind
@@ -46,6 +50,10 @@ type StdNetBind struct {
 
 	blackhole4 bool
 	blackhole6 bool
+
+	framedOpts     conceal.FramedOpts
+	preludeOpts    conceal.PreludeOpts
+	masqueradeOpts conceal.MasqueradeOpts
 }
 
 func NewStdNetBind() Bind {
@@ -86,6 +94,18 @@ var (
 	_ Bind     = (*StdNetBind)(nil)
 	_ Endpoint = &StdNetEndpoint{}
 )
+
+func (b *StdNetBind) SetFramedOpts(opts conceal.FramedOpts) {
+	b.framedOpts = opts
+}
+
+func (b *StdNetBind) SetPreludeOpts(opts conceal.PreludeOpts) {
+	b.preludeOpts = opts
+}
+
+func (b *StdNetBind) SetMasqueradeOpts(opts conceal.MasqueradeOpts) {
+	b.masqueradeOpts = opts
+}
 
 func (*StdNetBind) ParseEndpoint(s string) (Endpoint, error) {
 	e, err := netip.ParseAddrPort(s)

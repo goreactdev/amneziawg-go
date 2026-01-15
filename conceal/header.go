@@ -1,4 +1,4 @@
-package device
+package conceal
 
 import (
 	"crypto/rand"
@@ -9,12 +9,12 @@ import (
 	"strings"
 )
 
-type magicHeader struct {
+type rangedHeader struct {
 	start uint32
 	end   uint32
 }
 
-func newMagicHeader(spec string) (*magicHeader, error) {
+func NewRangedHeader(spec string) (*rangedHeader, error) {
 	parts := strings.Split(spec, "-")
 	if len(parts) < 1 || len(parts) > 2 {
 		return nil, errors.New("bad format")
@@ -39,36 +39,25 @@ func newMagicHeader(spec string) (*magicHeader, error) {
 		return nil, errors.New("wrong range specified")
 	}
 
-	return &magicHeader{
+	return &rangedHeader{
 		start: uint32(start),
 		end:   uint32(end),
 	}, nil
 }
 
-func magicHeaderFromSingleValue(val uint32) *magicHeader {
-	return &magicHeader{
-		start: val,
-		end:   val,
-	}
-}
-
-func (h *magicHeader) GenSpec() string {
+func (h *rangedHeader) GenSpec() string {
 	if h.start == h.end {
 		return fmt.Sprintf("%d", h.start)
 	}
 	return fmt.Sprintf("%d-%d", h.start, h.end)
 }
 
-func (h *magicHeader) Validate(val uint32) bool {
+func (h *rangedHeader) Validate(val uint32) bool {
 	return h.start <= val && val <= h.end
 }
 
-func (h *magicHeader) Generate() uint32 {
+func (h *rangedHeader) Generate() uint32 {
 	high := int64(h.end - h.start + 1)
 	r, _ := rand.Int(rand.Reader, big.NewInt(high))
 	return h.start + uint32(r.Int64())
-}
-
-func (h *magicHeader) IsSingleValue(val uint32) bool {
-	return h.start == val && h.end == val
 }

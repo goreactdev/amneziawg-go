@@ -46,9 +46,11 @@ type Device struct {
 		port          uint16 // listening port
 		fwmark        uint32 // mark value (0 = disabled)
 		brokenRoaming bool
-		obfsIn        conceal.Obfs
-		obfsOut       conceal.Obfs
-		network       string
+
+		network        string
+		framedOpts     conceal.FramedOpts
+		preludeOpts    conceal.PreludeOpts
+		masqueradeOpts conceal.MasqueradeOpts
 	}
 
 	staticIdentity struct {
@@ -93,28 +95,6 @@ type Device struct {
 	ipcMutex sync.RWMutex
 	closed   chan struct{}
 	log      *Logger
-
-	junk struct {
-		min   int
-		max   int
-		count int
-	}
-
-	headers struct {
-		init      *magicHeader
-		cookie    *magicHeader
-		response  *magicHeader
-		transport *magicHeader
-	}
-
-	paddings struct {
-		init      int
-		response  int
-		cookie    int
-		transport int
-	}
-
-	ipackets [5]conceal.Obfs
 }
 
 // deviceState represents the state of a Device.
@@ -327,11 +307,6 @@ func NewDevice(tunDevice tun.Device, bind conn.Bind, logger *Logger) *Device {
 
 	device.net.network = "udp"
 
-	device.headers.init = magicHeaderFromSingleValue(MessageInitiationType)
-	device.headers.response = magicHeaderFromSingleValue(MessageResponseType)
-	device.headers.cookie = magicHeaderFromSingleValue(MessageCookieReplyType)
-	device.headers.transport = magicHeaderFromSingleValue(MessageTransportType)
-
 	device.PopulatePools()
 
 	// create queues
@@ -529,9 +504,16 @@ func (device *Device) BindUpdate() error {
 		underlying = multi.Bind
 	}
 
-	if obfuscatable, ok := underlying.(conn.Obfuscatable); ok {
-		obfuscatable.SetObfsIn(netc.obfsIn)
-		obfuscatable.SetObfsOut(netc.obfsOut)
+	if framable, ok := underlying.(conn.Framable); ok {
+		framable.SetFramedOpts(netc.framedOpts)
+	}
+
+	if preludable, ok := underlying.(conn.Preludable); ok {
+		preludable.SetPreludeOpts(netc.preludeOpts)
+	}
+
+	if masqueradable, ok := underlying.(conn.Masqueradable); ok {
+		masqueradable.SetMasqueradeOpts(netc.masqueradeOpts)
 	}
 
 	recvFns, netc.port, err = netc.bind.Open(netc.port)

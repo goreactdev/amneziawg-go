@@ -53,11 +53,10 @@ const (
 )
 
 const (
-	MessageUnknownType     uint32 = 0
-	MessageInitiationType  uint32 = 1
-	MessageResponseType    uint32 = 2
-	MessageCookieReplyType uint32 = 3
-	MessageTransportType   uint32 = 4
+	MessageInitiationType  = 1
+	MessageResponseType    = 2
+	MessageCookieReplyType = 3
+	MessageTransportType   = 4
 )
 
 const (
@@ -194,10 +193,8 @@ func (device *Device) CreateMessageInitiation(peer *Peer) (*MessageInitiation, e
 
 	handshake.mixHash(handshake.remoteStatic[:])
 
-	msgType := device.headers.init.Generate()
-
 	msg := MessageInitiation{
-		Type:      msgType,
+		Type:      MessageInitiationType,
 		Ephemeral: handshake.localEphemeral.publicKey(),
 	}
 
@@ -370,7 +367,7 @@ func (device *Device) CreateMessageResponse(peer *Peer) (*MessageResponse, error
 	}
 
 	var msg MessageResponse
-	msg.Type = device.headers.response.Generate()
+	msg.Type = MessageResponseType
 	msg.Sender = handshake.localIndex
 	msg.Receiver = handshake.remoteIndex
 
