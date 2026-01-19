@@ -35,10 +35,10 @@ var (
 // proposal in https://github.com/golang/go/issues/45886#issuecomment-1218301564.
 type StdNetBind struct {
 	mu            sync.Mutex // protects all fields except as specified
-	ipv4          *net.UDPConn
-	ipv6          *net.UDPConn
-	ipv4PC        *ipv4.PacketConn // will be nil on non-Linux
-	ipv6PC        *ipv6.PacketConn // will be nil on non-Linux
+	ipv4          UDPConn
+	ipv6          UDPConn
+	ipv4PC        LinuxPacketConn // will be nil on non-Linux
+	ipv6PC        LinuxPacketConn // will be nil on non-Linux
 	ipv4TxOffload bool
 	ipv4RxOffload bool
 	ipv6TxOffload bool
@@ -47,6 +47,7 @@ type StdNetBind struct {
 	// these two fields are not guarded by mu
 	udpAddrPool sync.Pool
 	msgsPool    sync.Pool
+	bufPool     sync.Pool
 
 	blackhole4 bool
 	blackhole6 bool
@@ -76,6 +77,12 @@ func NewStdNetBind() Bind {
 					msgs[i].OOB = make([]byte, 0, stickyControlSize+gsoControlSize)
 				}
 				return &msgs
+			},
+		},
+
+		bufPool: sync.Pool{
+			New: func() any {
+				return make([]byte, 65535)
 			},
 		},
 	}
@@ -160,9 +167,9 @@ func (s *StdNetBind) Open(uport uint16) ([]ReceiveFunc, uint16, error) {
 	// If uport is 0, we can retry on failure.
 again:
 	port := int(uport)
-	var v4conn, v6conn *net.UDPConn
-	var v4pc *ipv4.PacketConn
-	var v6pc *ipv6.PacketConn
+	var v4conn, v6conn UDPConn
+	var v4pc LinuxPacketConn
+	var v6pc LinuxPacketConn
 
 	v4conn, port, err = listenNet("udp4", port)
 	if err != nil && !errors.Is(err, syscall.EAFNOSUPPORT) {
@@ -185,8 +192,10 @@ again:
 		s.ipv4TxOffload, s.ipv4RxOffload = supportsUDPOffload(v4conn)
 		if runtime.GOOS == "linux" || runtime.GOOS == "android" {
 			v4pc = ipv4.NewPacketConn(v4conn)
+			v4pc = s.upgradePacketConn(v4pc)
 			s.ipv4PC = v4pc
 		}
+		v4conn = s.upgradeUDPConn(v4conn)
 		fns = append(fns, s.makeReceiveIPv4(v4pc, v4conn, s.ipv4RxOffload))
 		s.ipv4 = v4conn
 	}
@@ -194,8 +203,10 @@ again:
 		s.ipv6TxOffload, s.ipv6RxOffload = supportsUDPOffload(v6conn)
 		if runtime.GOOS == "linux" || runtime.GOOS == "android" {
 			v6pc = ipv6.NewPacketConn(v6conn)
+			v6pc = s.upgradePacketConn(v6pc)
 			s.ipv6PC = v6pc
 		}
+		v6conn = s.upgradeUDPConn(v6conn)
 		fns = append(fns, s.makeReceiveIPv6(v6pc, v6conn, s.ipv6RxOffload))
 		s.ipv6 = v6conn
 	}
@@ -233,7 +244,7 @@ type batchWriter interface {
 
 func (s *StdNetBind) receiveIP(
 	br batchReader,
-	conn *net.UDPConn,
+	conn UDPConn,
 	rxOffload bool,
 	bufs [][]byte,
 	sizes []int,
@@ -285,13 +296,13 @@ func (s *StdNetBind) receiveIP(
 	return numMsgs, nil
 }
 
-func (s *StdNetBind) makeReceiveIPv4(pc *ipv4.PacketConn, conn *net.UDPConn, rxOffload bool) ReceiveFunc {
+func (s *StdNetBind) makeReceiveIPv4(pc LinuxPacketConn, conn UDPConn, rxOffload bool) ReceiveFunc {
 	return func(bufs [][]byte, sizes []int, eps []Endpoint) (n int, err error) {
 		return s.receiveIP(pc, conn, rxOffload, bufs, sizes, eps)
 	}
 }
 
-func (s *StdNetBind) makeReceiveIPv6(pc *ipv6.PacketConn, conn *net.UDPConn, rxOffload bool) ReceiveFunc {
+func (s *StdNetBind) makeReceiveIPv6(pc LinuxPacketConn, conn UDPConn, rxOffload bool) ReceiveFunc {
 	return func(bufs [][]byte, sizes []int, eps []Endpoint) (n int, err error) {
 		return s.receiveIP(pc, conn, rxOffload, bufs, sizes, eps)
 	}
@@ -417,7 +428,7 @@ retry:
 	return err
 }
 
-func (s *StdNetBind) send(conn *net.UDPConn, pc batchWriter, msgs []ipv6.Message) error {
+func (s *StdNetBind) send(conn UDPConn, pc batchWriter, msgs []ipv6.Message) error {
 	var (
 		n     int
 		err   error

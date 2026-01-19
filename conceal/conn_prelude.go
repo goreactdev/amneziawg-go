@@ -38,72 +38,7 @@ func (p *junkGenerator) generate(b []byte) []byte {
 	return junk
 }
 
-func NewPreludeConn(conn net.Conn, bp *BufferPool, opts PreludeOpts) (c *PreludeConn, ok bool) {
-	empty := true
-	for _, rules := range opts.RulesArr {
-		if rules != nil {
-			empty = false
-		}
-	}
-
-	if empty && opts.Jc == 0 {
-		return nil, false
-	}
-
-	return &PreludeConn{
-		Conn:     conn,
-		rulesArr: opts.RulesArr,
-		pool:     bp,
-	}, true
-}
-
-type PreludeConn struct {
-	net.Conn
-	rulesArr [5]Rules
-	once     sync.Once
-	pool     *BufferPool
-}
-
-func (c *PreludeConn) Read(b []byte) (n int, err error) {
-	return c.Conn.Read(b)
-}
-
-func (c *PreludeConn) Write(b []byte) (n int, err error) {
-	c.once.Do(func() {
-		tmp := c.pool.GetBuffer()
-		defer c.pool.Put(tmp)
-
-		ctx := &writeContext{
-			FlexBuffer: NewFlexBuffer(nil),
-			BufferPool: c.pool,
-		}
-
-		for _, rules := range c.rulesArr {
-			if rules == nil {
-				continue
-			}
-
-			w := bytes.NewBuffer(tmp)
-
-			if err = rules.Write(w, ctx); err != nil {
-				return
-			}
-
-			_, err = c.Conn.Write(tmp)
-			if err != nil {
-				return
-			}
-		}
-	})
-
-	if err != nil {
-		return 0, err
-	}
-
-	return c.Conn.Write(b)
-}
-
-func NewPreludeUDPConn(conn *net.UDPConn, pool *BufferPool, opts PreludeOpts) (c *PreludeUDPConn, ok bool) {
+func NewPreludeUDPConn(conn UDPConn, origin UDPConn, pool *sync.Pool, opts PreludeOpts) (c *PreludeUDPConn, ok bool) {
 	empty := true
 	for _, rules := range opts.RulesArr {
 		if rules != nil {
@@ -122,7 +57,8 @@ func NewPreludeUDPConn(conn *net.UDPConn, pool *BufferPool, opts PreludeOpts) (c
 
 	return &PreludeUDPConn{
 		UDPConn:   conn,
-		pool:      pool,
+		origin:    origin,
+		pool:      WrapBufferPool(pool),
 		rulesArr:  opts.RulesArr,
 		junkCount: opts.Jc,
 		junkGen:   newJunkGenerator(opts.Jmin, opts.Jmax),
@@ -130,20 +66,17 @@ func NewPreludeUDPConn(conn *net.UDPConn, pool *BufferPool, opts PreludeOpts) (c
 }
 
 type PreludeUDPConn struct {
-	*net.UDPConn
+	UDPConn
+	origin    UDPConn
 	pool      *BufferPool
 	rulesArr  [5]Rules
 	junkCount int
 	junkGen   *junkGenerator
 }
 
-func (c *PreludeUDPConn) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error) {
-	return c.UDPConn.ReadMsgUDP(b, oob)
-}
-
 func (c *PreludeUDPConn) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
 	if len(b) > 0 && b[0] == WireguardMsgInitiationType {
-		tmp := c.pool.GetBuffer()
+		tmp := c.pool.Get()
 		defer c.pool.Put(tmp)
 
 		ctx := &writeContext{
@@ -178,29 +111,98 @@ func (c *PreludeUDPConn) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn 
 	return c.UDPConn.WriteMsgUDP(b, oob, addr)
 }
 
+func NewPreludeBatchConn(conn BatchConn, origin BatchConn, bufPool *sync.Pool, msgsPool *sync.Pool, opts PreludeOpts) (c *PreludeBatchConn, ok bool) {
+	empty := true
+	for _, rules := range opts.RulesArr {
+		if rules != nil {
+			empty = false
+		}
+	}
+
+	if empty && opts.Jc == 0 {
+		return nil, false
+	}
+
+	if opts.Jmin > opts.Jmax {
+		opts.Jmin, opts.Jmax = opts.Jmax, opts.Jmin
+	}
+
+	return &PreludeBatchConn{
+		BatchConn: conn,
+		origin:    origin,
+		bufPool:   WrapBufferPool(bufPool),
+		msgsPool:  msgsPool,
+		rulesArr:  opts.RulesArr,
+		junkCount: opts.Jc,
+		junkGen:   newJunkGenerator(opts.Jmin, opts.Jmax),
+	}, true
+}
+
 type PreludeBatchConn struct {
 	BatchConn
-	pool      *BufferPool
+	origin    BatchConn
+	bufPool   *BufferPool
+	msgsPool  *sync.Pool
 	rulesArr  [5]Rules
 	junkCount int
 	junkGen   *junkGenerator
 }
 
-func (c *PreludeBatchConn) ReadBatch(ms []ipv4.Message, flags int) (n int, err error) {
-	return c.BatchConn.ReadBatch(ms, flags)
-}
-
 func (c *PreludeBatchConn) WriteBatch(ms []ipv4.Message, flags int) (n int, err error) {
-	hasInit := false
-	for _, m := range ms {
-		b := m.Buffers[0]
+	var initMsg *ipv4.Message
+	for i := range ms {
+		b := ms[i].Buffers[0]
 		if len(b) > 0 && b[0] == WireguardMsgInitiationType {
-			hasInit = true
+			initMsg = &ms[i]
 		}
 	}
 
-	if hasInit {
+	if initMsg != nil {
+		ctx := &writeContext{
+			FlexBuffer: NewFlexBuffer(nil),
+			BufferPool: c.bufPool,
+		}
 
+		msgs := c.msgsPool.Get().(*[]ipv4.Message)
+		defer c.msgsPool.Put(msgs)
+		n := 0
+
+		for _, rules := range c.rulesArr {
+			buf := c.bufPool.Get()
+			defer c.bufPool.Put(buf)
+
+			w := bytes.NewBuffer(buf[:0])
+			if err = rules.Write(w, ctx); err != nil {
+				return 0, err
+			}
+
+			(*msgs)[n].Buffers[0] = w.Bytes()
+			(*msgs)[n].OOB = initMsg.OOB
+			(*msgs)[n].Addr = initMsg.Addr
+			n++
+		}
+
+		for range c.junkCount {
+			buf := c.bufPool.Get()
+			defer c.bufPool.Put(buf)
+
+			(*msgs)[n].Buffers[0] = c.junkGen.generate(buf)
+			(*msgs)[n].OOB = initMsg.OOB
+			(*msgs)[n].Addr = initMsg.Addr
+			n++
+		}
+
+		var start int
+		for {
+			n, err = c.BatchConn.WriteBatch((*msgs)[start:], flags)
+			if err != nil {
+				return 0, err
+			}
+			if n == len((*msgs)[start:]) {
+				break
+			}
+			start += n
+		}
 	}
 
 	return c.BatchConn.WriteBatch(ms, flags)

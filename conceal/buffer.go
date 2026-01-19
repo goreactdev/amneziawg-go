@@ -60,10 +60,20 @@ func (b *FlexBuffer) Len() int {
 	return b.len
 }
 
-type BufferPool struct {
-	sync.Pool
+func WrapBufferPool(pool *sync.Pool) *BufferPool {
+	return &BufferPool{
+		pool: pool,
+	}
 }
 
-func (p *BufferPool) GetBuffer() []byte {
-	return p.Get().([]byte)
+type BufferPool struct {
+	pool *sync.Pool
+}
+
+func (p *BufferPool) Get() []byte {
+	return p.pool.Get().([]byte)
+}
+
+func (p *BufferPool) Put(b []byte) {
+	p.pool.Put(b)
 }

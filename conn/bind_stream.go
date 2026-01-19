@@ -15,7 +15,6 @@ import (
 var (
 	_ Bind          = (*BindStream)(nil)
 	_ Framable      = (*BindStream)(nil)
-	_ Preludable    = (*BindStream)(nil)
 	_ Masqueradable = (*BindStream)(nil)
 )
 
@@ -32,11 +31,9 @@ func NewBindStream() *BindStream {
 				return new(streamPacketQueue)
 			},
 		},
-		bufferPool: conceal.BufferPool{
-			Pool: sync.Pool{
-				New: func() any {
-					return make([]byte, 65535)
-				},
+		bufferPool: sync.Pool{
+			New: func() any {
+				return make([]byte, 65535)
 			},
 		},
 	}
@@ -48,7 +45,7 @@ type BindStream struct {
 	cancel           context.CancelFunc
 	wg               sync.WaitGroup
 	streamPacketPool sync.Pool
-	bufferPool       conceal.BufferPool
+	bufferPool       sync.Pool
 	dialer           net.Dialer
 	listenConfig     net.ListenConfig
 	port             uint16
@@ -161,19 +158,6 @@ func (b *BindStream) dial(ep *streamEndpoint) error {
 	go b.readStream(ep)
 
 	return nil
-}
-
-func (b *BindStream) upgradeConn(conn net.Conn) net.Conn {
-	if framed, ok := conceal.NewFramedConn(conn, b.framedOpts); ok {
-		conn = framed
-	}
-	if prelude, ok := conceal.NewPreludeConn(conn, &b.bufferPool, b.preludeOpts); ok {
-		conn = prelude
-	}
-	if masquerade, ok := conceal.NewMasqueradeConn(conn, &b.bufferPool, b.masqueradeOpts); ok {
-		conn = masquerade
-	}
-	return conn
 }
 
 func (b *BindStream) openConnections() error {

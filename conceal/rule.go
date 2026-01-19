@@ -96,7 +96,7 @@ func (r *bytesRule) Write(w io.Writer, ctx *writeContext) error {
 }
 
 func (r *bytesRule) Read(rd io.Reader, ctx *readContext) error {
-	tmp := ctx.GetBuffer()
+	tmp := ctx.Get()
 	defer ctx.Put(tmp)
 
 	buf := tmp[:len(r.data)]
@@ -129,7 +129,7 @@ func (r *randRule) Spec() string {
 }
 
 func (r *randRule) Write(w io.Writer, ctx *writeContext) error {
-	tmp := ctx.GetBuffer()
+	tmp := ctx.Get()
 	defer ctx.Put(tmp)
 
 	buf := tmp[:r.length]
@@ -140,7 +140,7 @@ func (r *randRule) Write(w io.Writer, ctx *writeContext) error {
 }
 
 func (r *randRule) Read(rd io.Reader, ctx *readContext) error {
-	tmp := ctx.GetBuffer()
+	tmp := ctx.Get()
 	defer ctx.Put(tmp)
 
 	buf := tmp[:r.length]
@@ -173,7 +173,7 @@ func (r *randDigitRule) Spec() string {
 const digits10 = "0123456789"
 
 func (r *randDigitRule) Write(w io.Writer, ctx *writeContext) error {
-	tmp := ctx.GetBuffer()
+	tmp := ctx.Get()
 	defer ctx.Put(tmp)
 
 	buf := tmp[:r.length]
@@ -187,7 +187,7 @@ func (r *randDigitRule) Write(w io.Writer, ctx *writeContext) error {
 }
 
 func (r *randDigitRule) Read(rd io.Reader, ctx *readContext) error {
-	tmp := ctx.GetBuffer()
+	tmp := ctx.Get()
 	defer ctx.Put(tmp)
 
 	buf := tmp[:r.length]
@@ -224,7 +224,7 @@ func (r *randCharRule) Spec() string {
 const chars52 = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 func (r *randCharRule) Write(w io.Writer, ctx *writeContext) error {
-	tmp := ctx.GetBuffer()
+	tmp := ctx.Get()
 	defer ctx.Put(tmp)
 
 	buf := tmp[:r.length]
@@ -238,7 +238,7 @@ func (r *randCharRule) Write(w io.Writer, ctx *writeContext) error {
 }
 
 func (r *randCharRule) Read(rd io.Reader, ctx *readContext) error {
-	tmp := ctx.GetBuffer()
+	tmp := ctx.Get()
 	defer ctx.Put(tmp)
 
 	buf := tmp[:r.length]
@@ -341,7 +341,7 @@ func (r *dataSizeRule) Spec() string {
 }
 
 func (r *dataSizeRule) Write(w io.Writer, ctx *writeContext) error {
-	tmp := ctx.GetBuffer()
+	tmp := ctx.Get()
 	defer ctx.Put(tmp)
 
 	size := int32(ctx.Cap())
@@ -383,7 +383,7 @@ func (r *dataSizeRule) Write(w io.Writer, ctx *writeContext) error {
 }
 
 func (r *dataSizeRule) Read(rd io.Reader, ctx *readContext) error {
-	tmp := ctx.GetBuffer()
+	tmp := ctx.Get()
 	defer ctx.Put(tmp)
 
 	switch r.format {

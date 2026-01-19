@@ -22,7 +22,7 @@ type FramedOpts struct {
 func (o FramedOpts) HasIntersections() bool {
 	headers := []*rangedHeader{o.H1, o.H2, o.H3, o.H4}
 
-	for i := 0; i < len(headers); i++ {
+	for i := range len(headers) {
 		left := headers[i]
 		if left == nil {
 			continue
@@ -130,32 +130,38 @@ func (enc frameEncoding) Encode(b []byte) []byte {
 	return b
 }
 
-func decodeOne(b []byte, header rangedHeader, padding int) (res []byte, ok bool) {
-	b = b[padding:]
-	return b, header.Validate(binary.LittleEndian.Uint32(b[:4]))
+func decodeOne(b []byte, header rangedHeader, padding int, originalHeader uint32) (res []byte, ok bool) {
+	bb := b[padding:]
+	if !header.Validate(binary.LittleEndian.Uint32(bb[:4])) {
+		return nil, false
+	}
+
+	b = b[:copy(bb, b)]
+	binary.LittleEndian.PutUint32(b[:4], originalHeader)
+	return b, true
 }
 
 func (enc frameEncoding) Decode(b []byte) []byte {
 	if len(b) == WireguardMsgInitiationSize+enc.padding.initial {
-		if bb, ok := decodeOne(b, enc.header.initial, enc.padding.initial); ok {
+		if bb, ok := decodeOne(b, enc.header.initial, enc.padding.initial, WireguardMsgInitiationType); ok {
 			return bb
 		}
 	}
 
 	if len(b) == WireguardMsgResponseSize+enc.padding.response {
-		if bb, ok := decodeOne(b, enc.header.response, enc.padding.response); ok {
+		if bb, ok := decodeOne(b, enc.header.response, enc.padding.response, WireguardMsgResponseType); ok {
 			return bb
 		}
 	}
 
 	if len(b) == WireguardMsgCookieReplySize+enc.padding.cookie {
-		if bb, ok := decodeOne(b, enc.header.cookie, enc.padding.cookie); ok {
+		if bb, ok := decodeOne(b, enc.header.cookie, enc.padding.cookie, WireguardMsgCookieReplyType); ok {
 			return bb
 		}
 	}
 
 	if len(b) >= WireguardMsgTransportMinSize+enc.padding.transport {
-		if bb, ok := decodeOne(b, enc.header.transport, enc.padding.transport); ok {
+		if bb, ok := decodeOne(b, enc.header.transport, enc.padding.transport, WireguardMsgTransportType); ok {
 			return bb
 		}
 	}
@@ -181,16 +187,19 @@ type FramedConn struct {
 }
 
 func (c *FramedConn) Read(b []byte) (n int, err error) {
-	b = c.enc.Decode(b)
-	return c.Conn.Read(b)
+	n, err = c.Conn.Read(b)
+	b = c.enc.Decode(b[:n])
+	return len(b), err
 }
 
 func (c *FramedConn) Write(b []byte) (n int, err error) {
-	b = c.enc.Encode(b)
-	return c.Conn.Write(b)
+	bb := c.enc.Encode(b)
+	diff := len(bb) - len(b)
+	n, err = c.Conn.Write(bb)
+	return max(n-diff, 0), err
 }
 
-func NewFramedUDPConn(conn *net.UDPConn, opts FramedOpts) (c *FramedUDPConn, ok bool) {
+func NewFramedUDPConn(conn UDPConn, opts FramedOpts) (c UDPConn, ok bool) {
 	enc, ok := newFrameEncoding(opts)
 	if !ok {
 		return nil, false
@@ -203,18 +212,33 @@ func NewFramedUDPConn(conn *net.UDPConn, opts FramedOpts) (c *FramedUDPConn, ok 
 }
 
 type FramedUDPConn struct {
-	*net.UDPConn
+	UDPConn
 	enc frameEncoding
 }
 
 func (c *FramedUDPConn) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error) {
-	b = c.enc.Decode(b)
-	return c.UDPConn.ReadMsgUDP(b, oob)
+	n, oobn, flags, addr, err = c.UDPConn.ReadMsgUDP(b, oob)
+	b = c.enc.Decode(b[:n])
+	return len(b), oobn, flags, addr, err
 }
 
 func (c *FramedUDPConn) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
-	b = c.enc.Encode(b)
-	return c.UDPConn.WriteMsgUDP(b, oob, addr)
+	bb := c.enc.Encode(b)
+	diff := len(bb) - len(b)
+	n, oobn, err = c.UDPConn.WriteMsgUDP(b, oob, addr)
+	return max(n-diff, 0), oobn, err
+}
+
+func NewFramedBatchConn(conn BatchConn, opts FramedOpts) (c BatchConn, ok bool) {
+	enc, ok := newFrameEncoding(opts)
+	if !ok {
+		return nil, false
+	}
+
+	return &FramedBatchConn{
+		BatchConn: conn,
+		enc:       enc,
+	}, true
 }
 
 type FramedBatchConn struct {
@@ -224,12 +248,10 @@ type FramedBatchConn struct {
 
 func (c *FramedBatchConn) ReadBatch(ms []ipv4.Message, flags int) (n int, err error) {
 	n, err = c.BatchConn.ReadBatch(ms, flags)
-	if err != nil {
-		return 0, err
-	}
 
 	for _, m := range ms[:n] {
-		m.Buffers[0] = c.enc.Decode(m.Buffers[0])
+		b := c.enc.Decode(m.Buffers[0][:m.N])
+		m.N = len(b)
 	}
 
 	return n, err
@@ -240,5 +262,7 @@ func (c *FramedBatchConn) WriteBatch(ms []ipv4.Message, flags int) (n int, err e
 		m.Buffers[0] = c.enc.Encode(m.Buffers[0])
 	}
 
+	// ms[x].N has incorrect N because the original data was modifier above
+	// however, WG does not check this field, so this is fine
 	return c.BatchConn.WriteBatch(ms, flags)
 }
