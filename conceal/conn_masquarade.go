@@ -60,10 +60,10 @@ func (c *MasqueradeConn) Write(b []byte) (n int, err error) {
 		BufferPool: c.pool,
 	}
 
-	buf := c.pool.Get()
-	defer c.pool.Put(buf)
+	t := c.pool.Get()
+	defer c.pool.Put(t)
 
-	w := bytes.NewBuffer(buf[:0])
+	w := bytes.NewBuffer(t[:0])
 
 	if err := c.rulesOut.Write(w, ctx); err != nil {
 		return 0, err
@@ -96,15 +96,12 @@ type MasqueradeUDPConn struct {
 }
 
 func (c *MasqueradeUDPConn) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error) {
-	tmp := c.pool.Get()
-	defer c.pool.Put(tmp)
-
-	n, oobn, flags, addr, err = c.UDPConn.ReadMsgUDP(tmp, oob)
+	n, oobn, flags, addr, err = c.UDPConn.ReadMsgUDP(b, oob)
 	if err != nil {
 		return n, oobn, flags, addr, err
 	}
 
-	r := bytes.NewBuffer(tmp)
+	r := bytes.NewBuffer(b[:n])
 	ctx := &readContext{
 		FlexBuffer: WrapFlexBuffer(b),
 		BufferPool: c.pool,
@@ -118,10 +115,10 @@ func (c *MasqueradeUDPConn) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr 
 }
 
 func (c *MasqueradeUDPConn) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
-	tmp := c.pool.Get()
-	defer c.pool.Put(tmp)
+	t := c.pool.Get()
+	defer c.pool.Put(t)
 
-	w := bytes.NewBuffer(tmp[:0])
+	w := bytes.NewBuffer(t[:0])
 	ctx := &writeContext{
 		FlexBuffer: WrapFlexBuffer(b),
 		BufferPool: c.pool,
@@ -131,7 +128,7 @@ func (c *MasqueradeUDPConn) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oo
 		return 0, 0, err
 	}
 
-	return c.UDPConn.WriteMsgUDP(tmp[:ctx.Len()], oob, addr)
+	return c.UDPConn.WriteMsgUDP(t[:ctx.Len()], oob, addr)
 }
 
 func NewMasqueradeBatchConn(conn BatchConn, bp *sync.Pool, opts MasqueradeOpts) (c *MasqueradeBatchConn, ok bool) {
@@ -155,9 +152,45 @@ type MasqueradeBatchConn struct {
 }
 
 func (c *MasqueradeBatchConn) ReadBatch(ms []ipv4.Message, flags int) (n int, err error) {
-	return c.BatchConn.ReadBatch(ms, flags)
+	n, err = c.BatchConn.ReadBatch(ms, flags)
+	if err != nil {
+		return 0, err
+	}
+
+	for i := range n {
+		r := bytes.NewBuffer(ms[i].Buffers[0][:ms[i].N])
+		ctx := &readContext{
+			FlexBuffer: WrapFlexBuffer(ms[i].Buffers[0]),
+			BufferPool: c.pool,
+		}
+
+		if err = c.rulesIn.Read(r, ctx); err != nil {
+			return 0, err
+		}
+
+		ms[i].N = ctx.Len()
+	}
+
+	return n, nil
 }
 
 func (c *MasqueradeBatchConn) WriteBatch(ms []ipv4.Message, flags int) (n int, err error) {
+	for i := range ms {
+		t := c.pool.Get()
+		defer c.pool.Put(t)
+
+		w := bytes.NewBuffer(t[:0])
+		ctx := &writeContext{
+			FlexBuffer: WrapFlexBuffer(ms[i].Buffers[0]),
+			BufferPool: c.pool,
+		}
+
+		if err = c.rulesOut.Write(w, ctx); err != nil {
+			return 0, err
+		}
+
+		ms[i].Buffers[0] = t
+	}
+
 	return c.WriteBatch(ms, flags)
 }
