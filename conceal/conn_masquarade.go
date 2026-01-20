@@ -39,7 +39,7 @@ func (c *MasqueradeConn) Read(b []byte) (n int, err error) {
 	}
 
 	ctx := &readContext{
-		FlexBuffer: NewFlexBuffer(b),
+		FlexBuffer: WrapFlexBuffer(b),
 		BufferPool: c.pool,
 	}
 
@@ -56,7 +56,7 @@ func (c *MasqueradeConn) Write(b []byte) (n int, err error) {
 	}
 
 	ctx := &writeContext{
-		FlexBuffer: NewFlexBuffer(b),
+		FlexBuffer: WrapFlexBuffer(b),
 		BufferPool: c.pool,
 	}
 
@@ -106,7 +106,7 @@ func (c *MasqueradeUDPConn) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr 
 
 	r := bytes.NewBuffer(tmp)
 	ctx := &readContext{
-		FlexBuffer: NewFlexBuffer(b),
+		FlexBuffer: WrapFlexBuffer(b),
 		BufferPool: c.pool,
 	}
 
@@ -123,7 +123,7 @@ func (c *MasqueradeUDPConn) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oo
 
 	w := bytes.NewBuffer(tmp[:0])
 	ctx := &writeContext{
-		FlexBuffer: NewFlexBuffer(b),
+		FlexBuffer: WrapFlexBuffer(b),
 		BufferPool: c.pool,
 	}
 

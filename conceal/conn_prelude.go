@@ -76,11 +76,11 @@ type PreludeUDPConn struct {
 
 func (c *PreludeUDPConn) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
 	if len(b) > 0 && b[0] == WireguardMsgInitiationType {
-		tmp := c.pool.Get()
-		defer c.pool.Put(tmp)
+		b := c.pool.Get()
+		defer c.pool.Put(b)
 
 		ctx := &writeContext{
-			FlexBuffer: NewFlexBuffer(nil),
+			FlexBuffer: WrapFlexBuffer(nil),
 			BufferPool: c.pool,
 		}
 
@@ -89,20 +89,19 @@ func (c *PreludeUDPConn) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn 
 				continue
 			}
 
-			w := bytes.NewBuffer(tmp[:0])
-
+			w := bytes.NewBuffer(b[:0])
 			if err = rules.Write(w, ctx); err != nil {
 				return 0, 0, err
 			}
 
-			if _, _, err = c.UDPConn.WriteMsgUDP(w.Bytes(), oob, addr); err != nil {
+			if _, _, err = c.origin.WriteMsgUDP(w.Bytes(), oob, addr); err != nil {
 				return 0, 0, err
 			}
 		}
 
 		for range c.junkCount {
-			junk := c.junkGen.generate(tmp)
-			if _, _, err = c.UDPConn.WriteMsgUDP(junk, oob, addr); err != nil {
+			junk := c.junkGen.generate(b)
+			if _, _, err = c.origin.WriteMsgUDP(junk, oob, addr); err != nil {
 				return 0, 0, err
 			}
 		}
@@ -159,15 +158,19 @@ func (c *PreludeBatchConn) WriteBatch(ms []ipv4.Message, flags int) (n int, err 
 
 	if initMsg != nil {
 		ctx := &writeContext{
-			FlexBuffer: NewFlexBuffer(nil),
+			FlexBuffer: WrapFlexBuffer(nil),
 			BufferPool: c.bufPool,
 		}
 
 		msgs := c.msgsPool.Get().(*[]ipv4.Message)
 		defer c.msgsPool.Put(msgs)
-		n := 0
+		i := 0
 
 		for _, rules := range c.rulesArr {
+			if rules == nil {
+				continue
+			}
+
 			buf := c.bufPool.Get()
 			defer c.bufPool.Put(buf)
 
@@ -176,29 +179,30 @@ func (c *PreludeBatchConn) WriteBatch(ms []ipv4.Message, flags int) (n int, err 
 				return 0, err
 			}
 
-			(*msgs)[n].Buffers[0] = w.Bytes()
-			(*msgs)[n].OOB = initMsg.OOB
-			(*msgs)[n].Addr = initMsg.Addr
-			n++
+			(*msgs)[i].Buffers[0] = w.Bytes()
+			(*msgs)[i].OOB = initMsg.OOB
+			(*msgs)[i].Addr = initMsg.Addr
+			i++
 		}
 
 		for range c.junkCount {
 			buf := c.bufPool.Get()
 			defer c.bufPool.Put(buf)
 
-			(*msgs)[n].Buffers[0] = c.junkGen.generate(buf)
-			(*msgs)[n].OOB = initMsg.OOB
-			(*msgs)[n].Addr = initMsg.Addr
-			n++
+			(*msgs)[i].Buffers[0] = c.junkGen.generate(buf)
+			(*msgs)[i].OOB = initMsg.OOB
+			(*msgs)[i].Addr = initMsg.Addr
+			i++
 		}
 
 		var start int
 		for {
-			n, err = c.BatchConn.WriteBatch((*msgs)[start:], flags)
+			m := (*msgs)[start:i]
+			n, err = c.origin.WriteBatch(m, flags)
 			if err != nil {
 				return 0, err
 			}
-			if n == len((*msgs)[start:]) {
+			if n == len(m) {
 				break
 			}
 			start += n

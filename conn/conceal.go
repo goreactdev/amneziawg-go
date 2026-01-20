@@ -23,7 +23,7 @@ func (b *StdNetBind) upgradeUDPConn(conn UDPConn) UDPConn {
 	if masquerade, ok := conceal.NewMasqueradeUDPConn(conn, &b.bufPool, b.masqueradeOpts); ok {
 		conn = masquerade
 	}
-	if framed, ok := conceal.NewFramedUDPConn(conn, b.framedOpts); ok {
+	if framed, ok := conceal.NewFramedUDPConn(conn, &b.bufPool, b.framedOpts); ok {
 		conn = framed
 	}
 	if prelude, ok := conceal.NewPreludeUDPConn(conn, origin, &b.bufPool, b.preludeOpts); ok {
@@ -37,7 +37,7 @@ func (b *StdNetBind) upgradePacketConn(conn LinuxPacketConn) LinuxPacketConn {
 	if masquerade, ok := conceal.NewMasqueradeBatchConn(conn, &b.bufPool, b.masqueradeOpts); ok {
 		conn = masquerade
 	}
-	if framed, ok := conceal.NewFramedBatchConn(conn, b.framedOpts); ok {
+	if framed, ok := conceal.NewFramedBatchConn(conn, &b.bufPool, b.framedOpts); ok {
 		conn = framed
 	}
 	if prelude, ok := conceal.NewPreludeBatchConn(conn, origin, &b.bufPool, &b.msgsPool, b.preludeOpts); ok {
@@ -62,7 +62,7 @@ func (b *BindStream) upgradeConn(conn net.Conn) net.Conn {
 	if masquerade, ok := conceal.NewMasqueradeConn(conn, &b.bufferPool, b.masqueradeOpts); ok {
 		conn = masquerade
 	}
-	if framed, ok := conceal.NewFramedConn(conn, b.framedOpts); ok {
+	if framed, ok := conceal.NewFramedConn(conn, &b.bufferPool, b.framedOpts); ok {
 		conn = framed
 	}
 	return conn

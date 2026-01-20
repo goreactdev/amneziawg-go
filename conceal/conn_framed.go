@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"net"
+	"sync"
 
 	"golang.org/x/net/ipv4"
 )
@@ -19,7 +20,7 @@ type FramedOpts struct {
 	S4 int
 }
 
-func (o FramedOpts) HasIntersections() bool {
+func (o *FramedOpts) HasIntersections() bool {
 	headers := []*rangedHeader{o.H1, o.H2, o.H3, o.H4}
 
 	for i := range len(headers) {
@@ -43,50 +44,58 @@ func (o FramedOpts) HasIntersections() bool {
 	return false
 }
 
-func newFrameEncoding(opts FramedOpts) (enc frameEncoding, ok bool) {
-	enc = frameEncoding{}
+func newFrameEncoding(opts FramedOpts) (e frameEncoding, ok bool) {
+	e = frameEncoding{}
 
 	if opts.H1 != nil {
-		enc.header.initial = *opts.H1
+		e.header.initial = *opts.H1
 		ok = true
+	} else {
+		e.header.initial = rangedHeader{WireguardMsgInitiationType, WireguardMsgInitiationType}
 	}
 
 	if opts.H2 != nil {
-		enc.header.response = *opts.H2
+		e.header.response = *opts.H2
 		ok = true
+	} else {
+		e.header.response = rangedHeader{WireguardMsgResponseType, WireguardMsgResponseType}
 	}
 
 	if opts.H3 != nil {
-		enc.header.cookie = *opts.H3
+		e.header.cookie = *opts.H3
 		ok = true
+	} else {
+		e.header.cookie = rangedHeader{WireguardMsgCookieReplyType, WireguardMsgCookieReplyType}
 	}
 
 	if opts.H4 != nil {
-		enc.header.transport = *opts.H4
+		e.header.transport = *opts.H4
 		ok = true
+	} else {
+		e.header.transport = rangedHeader{WireguardMsgTransportType, WireguardMsgTransportType}
 	}
 
 	if opts.S1 != 0 {
-		enc.padding.initial = opts.S1
+		e.padding.initial = opts.S1
 		ok = true
 	}
 
 	if opts.S2 != 0 {
-		enc.padding.response = opts.S2
+		e.padding.response = opts.S2
 		ok = true
 	}
 
 	if opts.S3 != 0 {
-		enc.padding.cookie = opts.S3
+		e.padding.cookie = opts.S3
 		ok = true
 	}
 
 	if opts.S4 != 0 {
-		enc.padding.transport = opts.S4
+		e.padding.transport = opts.S4
 		ok = true
 	}
 
-	return enc, ok
+	return e, ok
 }
 
 type frameEncoding struct {
@@ -102,66 +111,85 @@ type frameEncoding struct {
 		cookie    int
 		transport int
 	}
+	compat bool
 }
 
-func encodeOne(b []byte, header rangedHeader, padding int) []byte {
-	binary.LittleEndian.PutUint32(b[:4], header.Generate())
+func (e *frameEncoding) encodeOne(dst, src []byte, header rangedHeader, padding int) int {
+	rand.Read(dst[:padding])
+	n := copy(dst[padding:], src)
 
-	oldLen := len(b)
-	b = b[:oldLen+padding]
-	copy(b[padding:], b[:oldLen])
-	rand.Read(b[:padding])
-
-	return b
-}
-
-func (enc frameEncoding) Encode(b []byte) []byte {
-	switch b[0] {
-	case WireguardMsgInitiationType:
-		b = encodeOne(b, enc.header.initial, enc.padding.initial)
-	case WireguardMsgResponseType:
-		b = encodeOne(b, enc.header.response, enc.padding.response)
-	case WireguardMsgCookieReplyType:
-		b = encodeOne(b, enc.header.cookie, enc.padding.cookie)
-	case WireguardMsgTransportType:
-		b = encodeOne(b, enc.header.transport, enc.padding.transport)
+	if !e.compat {
+		binary.LittleEndian.PutUint32(dst[padding:padding+4], header.Generate())
 	}
 
-	return b
+	return padding + n
 }
 
-func decodeOne(b []byte, header rangedHeader, padding int, originalHeader uint32) (res []byte, ok bool) {
+func (e *frameEncoding) Encode(dst, src []byte) int {
+	header := binary.LittleEndian.Uint32(src[:4])
+	if e.compat {
+		if e.header.initial.Validate(header) {
+			return e.encodeOne(dst, src, e.header.initial, e.padding.initial)
+		} else if e.header.response.Validate(header) {
+			return e.encodeOne(dst, src, e.header.response, e.padding.response)
+		} else if e.header.cookie.Validate(header) {
+			return e.encodeOne(dst, src, e.header.cookie, e.padding.cookie)
+		} else if e.header.transport.Validate(header) {
+			return e.encodeOne(dst, src, e.header.transport, e.padding.transport)
+		}
+	} else {
+		switch src[0] {
+		case WireguardMsgInitiationType:
+			return e.encodeOne(dst, src, e.header.initial, e.padding.initial)
+		case WireguardMsgResponseType:
+			return e.encodeOne(dst, src, e.header.response, e.padding.response)
+		case WireguardMsgCookieReplyType:
+			return e.encodeOne(dst, src, e.header.cookie, e.padding.cookie)
+		case WireguardMsgTransportType:
+			return e.encodeOne(dst, src, e.header.transport, e.padding.transport)
+		}
+	}
+
+	return 0
+}
+
+func (e *frameEncoding) decodeOne(b []byte, header rangedHeader, padding int, originalHeader uint32) (res []byte, ok bool) {
 	bb := b[padding:]
 	if !header.Validate(binary.LittleEndian.Uint32(bb[:4])) {
 		return nil, false
 	}
 
-	b = b[:copy(bb, b)]
-	binary.LittleEndian.PutUint32(b[:4], originalHeader)
+	n := copy(b, bb)
+	b = b[:n]
+
+	if !e.compat {
+		binary.LittleEndian.PutUint32(b[:4], originalHeader)
+	}
+
 	return b, true
 }
 
-func (enc frameEncoding) Decode(b []byte) []byte {
-	if len(b) == WireguardMsgInitiationSize+enc.padding.initial {
-		if bb, ok := decodeOne(b, enc.header.initial, enc.padding.initial, WireguardMsgInitiationType); ok {
+func (e *frameEncoding) Decode(b []byte) []byte {
+	if len(b) == WireguardMsgInitiationSize+e.padding.initial {
+		if bb, ok := e.decodeOne(b, e.header.initial, e.padding.initial, WireguardMsgInitiationType); ok {
 			return bb
 		}
 	}
 
-	if len(b) == WireguardMsgResponseSize+enc.padding.response {
-		if bb, ok := decodeOne(b, enc.header.response, enc.padding.response, WireguardMsgResponseType); ok {
+	if len(b) == WireguardMsgResponseSize+e.padding.response {
+		if bb, ok := e.decodeOne(b, e.header.response, e.padding.response, WireguardMsgResponseType); ok {
 			return bb
 		}
 	}
 
-	if len(b) == WireguardMsgCookieReplySize+enc.padding.cookie {
-		if bb, ok := decodeOne(b, enc.header.cookie, enc.padding.cookie, WireguardMsgCookieReplyType); ok {
+	if len(b) == WireguardMsgCookieReplySize+e.padding.cookie {
+		if bb, ok := e.decodeOne(b, e.header.cookie, e.padding.cookie, WireguardMsgCookieReplyType); ok {
 			return bb
 		}
 	}
 
-	if len(b) >= WireguardMsgTransportMinSize+enc.padding.transport {
-		if bb, ok := decodeOne(b, enc.header.transport, enc.padding.transport, WireguardMsgTransportType); ok {
+	if len(b) >= WireguardMsgTransportMinSize+e.padding.transport {
+		if bb, ok := e.decodeOne(b, e.header.transport, e.padding.transport, WireguardMsgTransportType); ok {
 			return bb
 		}
 	}
@@ -169,7 +197,7 @@ func (enc frameEncoding) Decode(b []byte) []byte {
 	return b
 }
 
-func NewFramedConn(conn net.Conn, opts FramedOpts) (c *FramedConn, ok bool) {
+func NewFramedConn(conn net.Conn, pool *sync.Pool, opts FramedOpts) (c *FramedConn, ok bool) {
 	enc, ok := newFrameEncoding(opts)
 	if !ok {
 		return nil, false
@@ -177,13 +205,15 @@ func NewFramedConn(conn net.Conn, opts FramedOpts) (c *FramedConn, ok bool) {
 
 	return &FramedConn{
 		Conn: conn,
+		pool: WrapBufferPool(pool),
 		enc:  enc,
 	}, true
 }
 
 type FramedConn struct {
 	net.Conn
-	enc frameEncoding
+	pool *BufferPool
+	enc  frameEncoding
 }
 
 func (c *FramedConn) Read(b []byte) (n int, err error) {
@@ -193,13 +223,17 @@ func (c *FramedConn) Read(b []byte) (n int, err error) {
 }
 
 func (c *FramedConn) Write(b []byte) (n int, err error) {
-	bb := c.enc.Encode(b)
-	diff := len(bb) - len(b)
-	n, err = c.Conn.Write(bb)
+	t := c.pool.Get()
+	defer c.pool.Put(t)
+
+	n = c.enc.Encode(t, b)
+	diff := n - len(b)
+	n, err = c.Conn.Write(t)
+
 	return max(n-diff, 0), err
 }
 
-func NewFramedUDPConn(conn UDPConn, opts FramedOpts) (c UDPConn, ok bool) {
+func NewFramedUDPConn(conn UDPConn, pool *sync.Pool, opts FramedOpts) (c UDPConn, ok bool) {
 	enc, ok := newFrameEncoding(opts)
 	if !ok {
 		return nil, false
@@ -207,13 +241,15 @@ func NewFramedUDPConn(conn UDPConn, opts FramedOpts) (c UDPConn, ok bool) {
 
 	return &FramedUDPConn{
 		UDPConn: conn,
+		pool:    WrapBufferPool(pool),
 		enc:     enc,
 	}, true
 }
 
 type FramedUDPConn struct {
 	UDPConn
-	enc frameEncoding
+	pool *BufferPool
+	enc  frameEncoding
 }
 
 func (c *FramedUDPConn) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error) {
@@ -223,13 +259,17 @@ func (c *FramedUDPConn) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net
 }
 
 func (c *FramedUDPConn) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
-	bb := c.enc.Encode(b)
-	diff := len(bb) - len(b)
-	n, oobn, err = c.UDPConn.WriteMsgUDP(b, oob, addr)
+	t := c.pool.Get()
+	defer c.pool.Put(t)
+
+	n = c.enc.Encode(t, b)
+	diff := n - len(b)
+	n, oobn, err = c.UDPConn.WriteMsgUDP(t[:n], oob, addr)
+
 	return max(n-diff, 0), oobn, err
 }
 
-func NewFramedBatchConn(conn BatchConn, opts FramedOpts) (c BatchConn, ok bool) {
+func NewFramedBatchConn(conn BatchConn, pool *sync.Pool, opts FramedOpts) (c BatchConn, ok bool) {
 	enc, ok := newFrameEncoding(opts)
 	if !ok {
 		return nil, false
@@ -237,29 +277,36 @@ func NewFramedBatchConn(conn BatchConn, opts FramedOpts) (c BatchConn, ok bool) 
 
 	return &FramedBatchConn{
 		BatchConn: conn,
+		pool:      WrapBufferPool(pool),
 		enc:       enc,
 	}, true
 }
 
 type FramedBatchConn struct {
 	BatchConn
-	enc frameEncoding
+	pool *BufferPool
+	enc  frameEncoding
 }
 
 func (c *FramedBatchConn) ReadBatch(ms []ipv4.Message, flags int) (n int, err error) {
 	n, err = c.BatchConn.ReadBatch(ms, flags)
 
-	for _, m := range ms[:n] {
-		b := c.enc.Decode(m.Buffers[0][:m.N])
-		m.N = len(b)
+	for i := range ms[:n] {
+		b := ms[i].Buffers[0][:ms[i].N]
+		b = c.enc.Decode(b)
+		ms[i].N = len(b)
 	}
 
 	return n, err
 }
 
 func (c *FramedBatchConn) WriteBatch(ms []ipv4.Message, flags int) (n int, err error) {
-	for _, m := range ms {
-		m.Buffers[0] = c.enc.Encode(m.Buffers[0])
+	for i := range ms {
+		t := c.pool.Get()
+		defer c.pool.Put(t)
+
+		n = c.enc.Encode(t, ms[i].Buffers[0])
+		ms[i].Buffers[0] = t[:n]
 	}
 
 	// ms[x].N has incorrect N because the original data was modifier above

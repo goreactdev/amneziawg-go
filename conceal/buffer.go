@@ -2,7 +2,7 @@ package conceal
 
 import "sync"
 
-func NewFlexBuffer(buf []byte) *FlexBuffer {
+func WrapFlexBuffer(buf []byte) *FlexBuffer {
 	return &FlexBuffer{
 		buf: buf,
 	}
