@@ -53,7 +53,7 @@ var UAPISecurityDescriptor *windows.SECURITY_DESCRIPTOR
 
 func init() {
 	var err error
-	UAPISecurityDescriptor, err = windows.SecurityDescriptorFromString("O:SYD:P(A;;GA;;;SY)(A;;GA;;;BA)S:(ML;;NWNRNX;;;HI)")
+	UAPISecurityDescriptor, err = windows.SecurityDescriptorFromString("O:BAD:P(A;;GA;;;SY)(A;;GA;;;BA)S:(ML;;NWNRNX;;;HI)")
 	if err != nil {
 		panic(err)
 	}

@@ -140,6 +140,7 @@ func (device *Device) RoutineReceiveIncoming(
 
 			// get message padding and type based on information from S1-S4 and H1-H4
 			msgType, padding := device.DeterminePacketTypeAndPadding(packet, MessageUnknownType)
+			device.log.Verbosef("RX packet: size=%d type=%d padding=%d first16=%x", size, msgType, padding, packet[:min(16, size)])
 			if padding > 0 {
 				copy(packet, packet[padding:])
 				packet = packet[:len(packet)-padding]
@@ -212,7 +213,7 @@ func (device *Device) RoutineReceiveIncoming(
 				}
 
 			default:
-				device.log.Verbosef("Received message with unknown type")
+				device.log.Verbosef("Received message with unknown type (size=%d, first8=%x)", size, packet[:min(8, len(packet))])
 				continue
 			}
 

@@ -94,6 +94,9 @@ func main() {
 	if !foreground {
 		foreground = os.Getenv(ENV_WG_PROCESS_FOREGROUND) == "1"
 	}
+	if runtime.GOOS == "windows" {
+		foreground = true
+	}
 
 	// get log level (default: info)
 

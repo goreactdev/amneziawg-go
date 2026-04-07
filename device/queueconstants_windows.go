@@ -10,6 +10,6 @@ const (
 	QueueOutboundSize          = 1024
 	QueueInboundSize           = 1024
 	QueueHandshakeSize         = 1024
-	MaxSegmentSize             = 2048 - 32 // largest possible UDP datagram
+	MaxSegmentSize             = 4096 // increased from 2016 for AWG padding support
 	PreallocatedBuffersPerPool = 0         // Disable and allow for infinite memory growth
 )

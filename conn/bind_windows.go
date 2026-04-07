@@ -22,7 +22,7 @@ import (
 
 const (
 	packetsPerRing = 1024
-	bytesPerPacket = 2048 - 32
+	bytesPerPacket = 4096
 	receiveSpins   = 15
 )
 
